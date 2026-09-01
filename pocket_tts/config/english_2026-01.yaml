@@ -2,6 +2,9 @@
 
 weights_path: hf://kyutai/pocket-tts/languages/english_2026-01/model.safetensors@39592ff23c9ef80098bb74895d104c26275fe2c9
 weights_path_without_voice_cloning: hf://kyutai/pocket-tts-without-voice-cloning/languages/english_2026-01/model.safetensors@d29db7978e464fb90cb3359ee0c69a273b9142cc
+timestamp_heads:
+- layer: 3
+  head: 8
 
 pad_with_spaces_for_short_inputs: true
 

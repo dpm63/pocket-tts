@@ -3,7 +3,7 @@
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from pocket_tts.utils.utils import download_if_necessary
 
@@ -113,6 +113,11 @@ class MimiConfig(StrictModel):
     outer_dim: int | None = None
 
 
+class TimestampHeadConfig(StrictModel):
+    layer: int
+    head: int
+
+
 class Config(StrictModel):
     flow_lm: FlowLMConfig
     mimi: MimiConfig
@@ -122,6 +127,27 @@ class Config(StrictModel):
     remove_semicolons: bool = False
     model_recommended_frames_after_eos: int | None = None
     default_temperature: float = 0.7
+    timestamp_heads: list[TimestampHeadConfig] | None = None
+
+    @model_validator(mode="after")
+    def validate_timestamp_heads(self):
+        if self.timestamp_heads is None:
+            return self
+        if not self.timestamp_heads:
+            raise ValueError("timestamp_heads must contain at least one layer/head pair")
+        seen: set[tuple[int, int]] = set()
+        for selected in self.timestamp_heads:
+            pair = (selected.layer, selected.head)
+            if selected.layer < 0 or selected.layer >= self.flow_lm.transformer.num_layers:
+                raise ValueError(
+                    f"Timestamp layer {selected.layer} is outside the FlowLM layer range"
+                )
+            if selected.head < 0 or selected.head >= self.flow_lm.transformer.num_heads:
+                raise ValueError(f"Timestamp head {selected.head} is outside the FlowLM head range")
+            if pair in seen:
+                raise ValueError(f"Duplicate timestamp head L{selected.layer}H{selected.head}")
+            seen.add(pair)
+        return self
 
 
 def load_config(yaml_path: str | Path) -> Config:

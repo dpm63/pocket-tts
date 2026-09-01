@@ -4,6 +4,7 @@ from torch.nn import functional as F
 
 from pocket_tts.modules.rope import RotaryEmbedding
 from pocket_tts.modules.stateful_module import StatefulModule
+from pocket_tts.timestamps.alignment import SelectedAttentionCapture
 
 
 def complete_kv(
@@ -168,7 +169,12 @@ class StreamingMultiheadAttention(StatefulModule):
         self._cache_backend.increment_step(state, increment)
 
     def forward(
-        self, query: torch.Tensor, model_state: dict | None, attn_mask: torch.Tensor | None = None
+        self,
+        query: torch.Tensor,
+        model_state: dict | None,
+        attn_mask: torch.Tensor | None = None,
+        attention_capture: SelectedAttentionCapture | None = None,
+        layer_index: int | None = None,
     ):
         state = None if model_state is None else self.get_state(model_state)
 
@@ -192,11 +198,15 @@ class StreamingMultiheadAttention(StatefulModule):
                 1, -1
             )
             attn_mask = _build_attention_mask(pos_q, pos_k, self.context)
+
         x = F.scaled_dot_product_attention(q, k_attn, v_attn, attn_mask, dropout_p=0.0)
         x = x.transpose(1, 2)
         # Reshape from (b, t, h, d) to (b, t, h*d)
         b, t, h, d = x.shape
         x = x.reshape(b, t, h * d)
         x = self.out_proj(x)
+
+        if attention_capture is not None and layer_index is not None:
+            attention_capture.capture_attention(layer_index, q, k_attn)
 
         return x

@@ -1,5 +1,8 @@
 weights_path: hf://kyutai/pocket-tts/languages/english_2026-04_24l/model.safetensors@492522650173a0653b7575cdc25ae09810e5d741
 weights_path_without_voice_cloning: hf://kyutai/pocket-tts-without-voice-cloning/languages/english_2026-04_24l/model.safetensors@e81d79e8194ad4c7ce879c87a4258ef20cbf2487
+timestamp_heads:
+- layer: 14
+  head: 10
 
 default_temperature: 0.3
 flow_lm:

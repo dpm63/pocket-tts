@@ -17,6 +17,13 @@ from pocket_tts.models.model_state import export_model_state
 from pocket_tts.models.tts_model import (  # noqa: E402
     TTSModel,
 )
+from pocket_tts.timestamps import (  # noqa: E402
+    AudioChunk,
+    TimestampedAudio,
+    WordEnd,
+    WordStart,
+    WordTimestamp,
+)
 
 # Public methods:
 # TTSModel.device
@@ -24,6 +31,16 @@ from pocket_tts.models.tts_model import (  # noqa: E402
 # TTSModel.load_model
 # TTSModel.generate_audio
 # TTSModel.generate_audio_stream
+# TTSModel.generate_audio_with_timestamps
+# TTSModel.generate_audio_with_timestamps_stream
 # TTSModel.get_state_for_audio_prompt
 
-__all__ = ["TTSModel", "export_model_state"]
+__all__ = [
+    "AudioChunk",
+    "TimestampedAudio",
+    "TTSModel",
+    "WordEnd",
+    "WordStart",
+    "WordTimestamp",
+    "export_model_state",
+]
