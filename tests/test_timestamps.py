@@ -10,6 +10,7 @@ import sentencepiece
 import torch
 from torch import nn
 
+import pocket_tts.timestamps.alignment as timestamp_alignment
 from pocket_tts.models.tts_model import TTSModel
 from pocket_tts.modules.attention import StreamingMultiheadAttention
 from pocket_tts.modules.rope import RotaryEmbedding
@@ -124,25 +125,40 @@ def test_alignment_transitions_to_next_word_and_hard_finishes():
     assert final == [WordEnd("two", 1, 0.08, 0.16)]
 
 
-def test_later_word_evidence_below_gate_advances_one_word():
+@pytest.fixture
+def non_next_attention_gate(monkeypatch):
+    threshold = 0.1
+    monkeypatch.setattr(timestamp_alignment, "_NON_NEXT_ATTENTION_THRESHOLD", threshold)
+    return threshold
+
+
+def test_later_word_evidence_below_gate_advances_one_word(non_next_attention_gate):
     alignment = WordAlignment(_units("one", "two", "three"))
     alignment.process_frame(torch.tensor([0.9, 0.05, 0.05]), True, 0.0)
-    events = alignment.process_frame(torch.tensor([0.0009, 0.0001, 0.9]), True, 0.08)
+    events = alignment.process_frame(
+        torch.tensor([non_next_attention_gate / 2, 0.01, 0.9]), True, 0.08
+    )
 
     assert events == [WordEnd("one", 0, 0.0, 0.08), WordStart("two", 1, 0.08)]
 
 
-def test_non_next_evidence_is_blocked_at_gate_threshold():
+def test_non_next_evidence_above_gate_is_blocked(non_next_attention_gate):
     alignment = WordAlignment(_units("one", "two", "three"))
     alignment.process_frame(torch.tensor([0.9, 0.05, 0.05]), True, 0.0)
 
-    assert alignment.process_frame(torch.tensor([0.001, 0.0001, 0.9]), True, 0.08) == []
+    assert (
+        alignment.process_frame(torch.tensor([non_next_attention_gate * 2, 0.01, 0.9]), True, 0.08)
+        == []
+    )
 
 
-def test_non_next_evidence_uses_no_distance_margin():
+def test_non_next_evidence_uses_no_distance_margin(non_next_attention_gate):
     alignment = WordAlignment(_units("one", "two", "three", "four"))
     alignment.process_frame(torch.tensor([0.9, 0.05, 0.03, 0.02]), True, 0.0)
-    assert alignment.process_frame(torch.tensor([0.0009, 0.0001, 0.0001, 0.00091]), True, 0.08)
+    current_score = non_next_attention_gate / 2
+    assert alignment.process_frame(
+        torch.tensor([current_score, 0.01, 0.01, current_score * 1.01]), True, 0.08
+    )
 
 
 def test_gate_never_blocks_next_word_evidence():
@@ -168,10 +184,10 @@ def test_unpunctuated_final_word_closes_on_first_silence():
     ]
 
 
-@pytest.mark.parametrize(
-    ("amplitude", "expected"), [(0.001001, True), (0.001, False), (0.000999, False)]
-)
-def test_rms_silence_threshold_is_minus_60_dbfs(amplitude, expected):
+@pytest.mark.parametrize(("dbfs", "expected"), [(-59.0, True), (-61.0, False)])
+def test_rms_silence_gate_uses_configured_threshold(monkeypatch, dbfs, expected):
+    monkeypatch.setattr(timestamp_alignment, "_SILENCE_RMS_THRESHOLD", 10 ** (-60.0 / 20))
+    amplitude = 10 ** (dbfs / 20)
     assert is_voiced(torch.full((100,), amplitude)) is expected
 
 
@@ -180,8 +196,9 @@ def test_empty_audio_is_silent():
 
 
 @pytest.mark.parametrize("dtype", [torch.float16, torch.float32, torch.float64])
-def test_silence_detection_supports_non_contiguous_float_inputs(dtype):
-    samples = torch.full((200,), 0.001001, dtype=dtype)[::2]
+def test_silence_detection_supports_non_contiguous_float_inputs(monkeypatch, dtype):
+    monkeypatch.setattr(timestamp_alignment, "_SILENCE_RMS_THRESHOLD", 0.1)
+    samples = torch.full((200,), 0.2, dtype=dtype)[::2]
     assert not samples.is_contiguous()
     assert is_voiced(samples)
 
@@ -529,15 +546,20 @@ def test_degraded_word_gaps_preserve_audio_and_event_order():
 
 def test_timestamp_head_config_validation():
     config = load_config(CONFIGS_DIR / "english.yaml").model_dump()
-    config["timestamp_heads"] = [{"layer": 3, "head": 8}]
-    validated = Config(**config)
-    assert validated.timestamp_heads[0].layer == 3
+    transformer = config["flow_lm"]["transformer"]
+    last_layer = transformer["num_layers"] - 1
+    last_head = transformer["num_heads"] - 1
 
-    config["timestamp_heads"] = [{"layer": 6, "head": 0}]
+    config["timestamp_heads"] = [{"layer": last_layer, "head": last_head}]
+    validated = Config(**config)
+    assert validated.timestamp_heads[0].layer == last_layer
+    assert validated.timestamp_heads[0].head == last_head
+
+    config["timestamp_heads"] = [{"layer": transformer["num_layers"], "head": 0}]
     with pytest.raises(ValueError, match="outside the FlowLM layer range"):
         Config(**config)
 
-    config["timestamp_heads"] = [{"layer": 0, "head": 16}]
+    config["timestamp_heads"] = [{"layer": 0, "head": transformer["num_heads"]}]
     with pytest.raises(ValueError, match="outside the FlowLM head range"):
         Config(**config)
 
