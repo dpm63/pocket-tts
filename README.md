@@ -1,12 +1,77 @@
-# Pocket TTS
+# Pocket TTS Timestamped
 
-<img width="1446" height="622" alt="pocket-tts-logo-v2-transparent" src="https://github.com/user-attachments/assets/637b5ed6-831f-4023-9b4c-741be21ab238" />
+Fork of [Pocket TTS](https://github.com/kyutai-labs/pocket-tts) that adds word-level timestamps for streaming and non-streaming generation.
 
-> [!IMPORTANT]
-> This is the `pocket-tts-timestamped` fork, which adds streaming word-level timestamps to
-> [Kyutai's Pocket TTS](https://github.com/kyutai-labs/pocket-tts). It uses the
-> `pocket_tts_timestamped` Python import and `pocket-tts-timestamped` command, so it can be
-> installed alongside the upstream `pocket-tts` distribution.
+## Quick start
+
+### Installation
+
+```bash
+pip install pocket-tts-timestamped
+```
+
+or:
+
+```bash
+uv add pocket-tts-timestamped
+```
+
+Pocket TTS supports Python 3.10 through 3.14 and requires PyTorch 2.5 or newer.
+
+### Generate audio with word timestamps
+
+```python
+from pocket_tts_timestamped import TTSModel
+
+model = TTSModel.load_model()
+voice = model.get_state_for_audio_prompt("alba")
+
+result = model.generate_audio_with_timestamps(voice_state, "Hello world!")
+for word in result.words:
+    print(word.word, word.start_time, word.end_time)
+process_audio(result.audio)
+```
+
+### Streaming timestamps
+
+```python
+from pocket_tts_timestamped import TTSModel, AudioChunk, WordEnd, WordStart
+
+model = TTSModel.load_model()
+voice = model.get_state_for_audio_prompt("alba")
+
+stream = model.generate_audio_with_timestamps_stream(voice_state, "Hello world!")
+for event in stream:
+    if isinstance(event, AudioChunk):
+        process_audio(event.audio)
+    elif isinstance(event, WordStart):
+        print("start", event.word_index, event.word, event.start_time)
+    elif isinstance(event, WordEnd):
+        print("end", event.word_index, event.word, event.end_time)
+```
+
+### Checkpoint support
+All official Pocket TTS checkpoints are supported, but accuracy differs between them.
+Preliminary results are provided for reference, MAE is calculated against CrisperWhisper 2.0 small's timestamps:
+| Checkpoint          | Heads        | Samples | Words | Skip rate | MAE |
+|---------------------|-------------|---------|-------|-----------|---------------|
+| English 2026-04     | L3H8        | 552     | 3,841 | 0.0260%   | 44.52 ms      |
+| English 2026-04 24L | L14H10      | 204     | 1,874 | 0.0000%   | 46.77 ms      |
+| English 2026-01     | L3H8        | 120     | 990   | 0.0000%   | 72.90 ms      |
+| French 24L          | L11H9+L17H8 | 81      | 628   | 0.0000%   | 59.62 ms      |
+| German              | L3H6        | 57      | 465   | 0.0000%   | 57.48 ms      |
+| German 24L          | L3H6+L16H6  | 39      | 354   | 0.2825%   | 67.20 ms      |
+| Italian             | L4H0        | 46      | 388   | 0.0000%   | 66.98 ms      |
+| Italian 24L         | L4H0+L15H12 | 56      | 491   | 0.0000%   | 117.60 ms     |
+| Portuguese          | L3H14       | 57      | 533   | 0.0000%   | 68.56 ms      |
+| Portuguese 24L      | L3H14+L15H9 | 62      | 597   | 0.0000%   | 120.62 ms     |
+| Spanish             | L2H3        | 55      | 507   | 0.0000%   | 91.58 ms      |
+| Spanish 24L         | L6H9        | 61      | 570   | 0.0000%   | 78.25 ms      |
+> [!WARNING]
+> These results are based on a relatively small sample size and a weak model.
+> If accuracy is important to your use case, wait for the definitive results.
+
+# About Pocket TTS
 
 A lightweight text-to-speech (TTS) application designed to run efficiently on CPUs.
 Forget about the hassle of using GPUs and web APIs serving TTS models. With Kyutai's Pocket TTS, generating audio is just a pip install and a function call away.
