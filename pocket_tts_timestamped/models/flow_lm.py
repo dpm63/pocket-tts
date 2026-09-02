@@ -6,12 +6,12 @@ import torch
 from torch import nn
 from typing_extensions import Self
 
-from pocket_tts.modules.mlp import SimpleMLPAdaLN
-from pocket_tts.modules.stateful_module import ModelState
-from pocket_tts.modules.text_conditioner import LUTConditioner
-from pocket_tts.modules.transformer import StreamingTransformer
-from pocket_tts.timestamps.alignment import SelectedAttentionCapture
-from pocket_tts.utils.config import FlowLMConfig
+from pocket_tts_timestamped.modules.mlp import SimpleMLPAdaLN
+from pocket_tts_timestamped.modules.stateful_module import ModelState
+from pocket_tts_timestamped.modules.text_conditioner import LUTConditioner
+from pocket_tts_timestamped.modules.transformer import StreamingTransformer
+from pocket_tts_timestamped.timestamps.alignment import SelectedAttentionCapture
+from pocket_tts_timestamped.utils.config import FlowLMConfig
 
 logger = logging.getLogger(__name__)
 

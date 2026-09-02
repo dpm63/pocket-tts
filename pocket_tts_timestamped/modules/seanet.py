@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from pocket_tts.modules.stateful_module import ModelState
+from pocket_tts_timestamped.modules.stateful_module import ModelState
 
 from .conv import StreamingConv1d, StreamingConvTranspose1d
 

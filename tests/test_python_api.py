@@ -1,8 +1,8 @@
 """Tests for the public Python API surface."""
 
-import pocket_tts
-from pocket_tts import TTSModel
-from pocket_tts.models.tts_model import TTSModel as TTSModelImpl
+import pocket_tts_timestamped
+from pocket_tts_timestamped import TTSModel
+from pocket_tts_timestamped.models.tts_model import TTSModel as TTSModelImpl
 
 
 def test_public_api_exports_expected_symbols():
@@ -15,8 +15,8 @@ def test_public_api_exports_expected_symbols():
         "WordTimestamp",
         "export_model_state",
     ]
-    assert pocket_tts.__all__ == expected_symbols
-    assert all(hasattr(pocket_tts, symbol) for symbol in expected_symbols)
+    assert pocket_tts_timestamped.__all__ == expected_symbols
+    assert all(hasattr(pocket_tts_timestamped, symbol) for symbol in expected_symbols)
 
 
 def test_public_api_tts_model_points_to_implementation():

@@ -11,11 +11,11 @@ import sentencepiece
 import torch
 from torch import nn
 
-import pocket_tts.timestamps.alignment as timestamp_alignment
-from pocket_tts.models.tts_model import TTSModel
-from pocket_tts.modules.attention import StreamingMultiheadAttention
-from pocket_tts.modules.rope import RotaryEmbedding
-from pocket_tts.timestamps import (
+import pocket_tts_timestamped.timestamps.alignment as timestamp_alignment
+from pocket_tts_timestamped.models.tts_model import TTSModel
+from pocket_tts_timestamped.modules.attention import StreamingMultiheadAttention
+from pocket_tts_timestamped.modules.rope import RotaryEmbedding
+from pocket_tts_timestamped.timestamps import (
     AudioChunk,
     SelectedAttentionCapture,
     TimestampedAudio,
@@ -29,8 +29,8 @@ from pocket_tts.timestamps import (
     build_timestamp_text_chunks,
     is_voiced,
 )
-from pocket_tts.utils.config import CONFIGS_DIR, Config, load_config
-from pocket_tts.utils.utils import download_if_necessary
+from pocket_tts_timestamped.utils.config import CONFIGS_DIR, Config, load_config
+from pocket_tts_timestamped.utils.utils import download_if_necessary
 
 
 class _SentencePiece021:
@@ -320,7 +320,7 @@ def test_timestamp_decoder_passes_time_major_latent_to_mimi():
     latents_queue.put((latent, torch.ones(1)))
     latents_queue.put(None)
 
-    with patch("pocket_tts.models.tts_model.is_voiced", return_value=True):
+    with patch("pocket_tts_timestamped.models.tts_model.is_voiced", return_value=True):
         model._decode_timestamped_audio_worker(
             latents_queue,
             result_queue,
@@ -478,13 +478,16 @@ def test_timestamp_generation_forwards_terminal_punctuation_setting(append_termi
     model._generate_audio_with_timestamps_short_text = short_text  # ty: ignore[invalid-assignment]
     with (
         patch(
-            "pocket_tts.models.tts_model.split_into_best_sentences", return_value=[chunk.text]
+            "pocket_tts_timestamped.models.tts_model.split_into_best_sentences",
+            return_value=[chunk.text],
         ) as split_text,
         patch(
-            "pocket_tts.models.tts_model.prepare_text_prompt", return_value=(chunk.text, 1)
+            "pocket_tts_timestamped.models.tts_model.prepare_text_prompt",
+            return_value=(chunk.text, 1),
         ) as prepare_text,
         patch(
-            "pocket_tts.models.tts_model._iter_timestamp_text_chunks", return_value=iter([chunk])
+            "pocket_tts_timestamped.models.tts_model._iter_timestamp_text_chunks",
+            return_value=iter([chunk]),
         ),
     ):
         list(TTSModel._generate_audio_with_timestamps_events(model, {}, "one", 50, None, True))
@@ -530,9 +533,13 @@ def test_chunk_event_offsets_and_global_word_indices():
     model._generate_audio_with_timestamps_short_text = short_text  # ty: ignore[invalid-assignment]
     with (
         patch(
-            "pocket_tts.models.tts_model.split_into_best_sentences", return_value=["One.", "Two."]
+            "pocket_tts_timestamped.models.tts_model.split_into_best_sentences",
+            return_value=["One.", "Two."],
         ),
-        patch("pocket_tts.models.tts_model._iter_timestamp_text_chunks", return_value=iter(chunks)),
+        patch(
+            "pocket_tts_timestamped.models.tts_model._iter_timestamp_text_chunks",
+            return_value=iter(chunks),
+        ),
     ):
         generator = TTSModel._generate_audio_with_timestamps_events(
             model, {}, "One. Two.", max_tokens=50, frames_after_eos=None, copy_state=True
@@ -579,9 +586,13 @@ def test_degraded_word_gaps_preserve_audio_and_event_order():
 
     model._generate_audio_with_timestamps_short_text = short_text  # ty: ignore[invalid-assignment]
     with (
-        patch("pocket_tts.models.tts_model.split_into_best_sentences", return_value=[chunk.text]),
         patch(
-            "pocket_tts.models.tts_model._iter_timestamp_text_chunks", return_value=iter([chunk])
+            "pocket_tts_timestamped.models.tts_model.split_into_best_sentences",
+            return_value=[chunk.text],
+        ),
+        patch(
+            "pocket_tts_timestamped.models.tts_model._iter_timestamp_text_chunks",
+            return_value=iter([chunk]),
         ),
     ):
         events = list(

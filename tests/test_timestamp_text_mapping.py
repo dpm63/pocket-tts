@@ -6,11 +6,11 @@ from unittest.mock import patch
 import pytest
 import torch
 
-from pocket_tts.models.tts_model import split_into_best_sentences
-from pocket_tts.modules.text_conditioner import LUTConditioner
-from pocket_tts.timestamps import build_timestamp_text_chunks
-from pocket_tts.timestamps.text import _iter_timestamp_text_chunks
-from pocket_tts.utils.config import CONFIGS_DIR, load_config
+from pocket_tts_timestamped.models.tts_model import split_into_best_sentences
+from pocket_tts_timestamped.modules.text_conditioner import LUTConditioner
+from pocket_tts_timestamped.timestamps import build_timestamp_text_chunks
+from pocket_tts_timestamped.timestamps.text import _iter_timestamp_text_chunks
+from pocket_tts_timestamped.utils.config import CONFIGS_DIR, load_config
 
 BYTE_PIECE = re.compile(r"<0x[0-9A-F]{2}>")
 
@@ -230,7 +230,7 @@ def test_common_unicode_mapping_does_not_enter_robust_fallback(conditioner, sour
         remove_semicolons=False,
     )
     with patch(
-        "pocket_tts.timestamps.text._map_source_words_to_chunks",
+        "pocket_tts_timestamped.timestamps.text._map_source_words_to_chunks",
         side_effect=AssertionError("robust fallback should not run"),
     ):
         assert build_timestamp_text_chunks(source_text, chunks, conditioner.tokenizer.sp)
@@ -266,10 +266,10 @@ def test_timestamp_chunk_mapping_tokenizes_later_chunks_lazily(conditioner):
 def test_product_mapping_degrades_to_unambiguous_gaps(conditioner):
     with (
         patch(
-            "pocket_tts.timestamps.text._map_source_words_to_chunks",
+            "pocket_tts_timestamped.timestamps.text._map_source_words_to_chunks",
             side_effect=ValueError("forced robust failure"),
         ),
-        patch("pocket_tts.timestamps.text.logger.warning") as warning,
+        patch("pocket_tts_timestamped.timestamps.text.logger.warning") as warning,
     ):
         chunks = list(
             _iter_timestamp_text_chunks(

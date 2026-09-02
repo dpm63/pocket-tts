@@ -1,4 +1,4 @@
-from pocket_tts.utils.utils import _ORIGINS_OF_PREDEFINED_VOICES
+from pocket_tts_timestamped.utils.utils import _ORIGINS_OF_PREDEFINED_VOICES
 
 DEFAULT_LANGUAGE = "english"
 DEFAULT_TEMPERATURE = 0.7

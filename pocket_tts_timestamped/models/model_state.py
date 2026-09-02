@@ -1,6 +1,6 @@
 """Reading and writing the voice-conditioning state as safetensors.
 
-A voice prompt is expensive to encode, so `pocket-tts export-voice` saves the
+A voice prompt is expensive to encode, so `pocket-tts-timestamped export-voice` saves the
 resulting per-module streaming state and generation reloads it.
 """
 

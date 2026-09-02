@@ -15,8 +15,8 @@ import platform
 import torch
 import torch.nn as nn
 
-from pocket_tts.models.flow_lm import FlowLMModel
-from pocket_tts.modules.transformer import StreamingTransformerLayer
+from pocket_tts_timestamped.models.flow_lm import FlowLMModel
+from pocket_tts_timestamped.modules.transformer import StreamingTransformerLayer
 
 logger = logging.getLogger(__name__)
 
