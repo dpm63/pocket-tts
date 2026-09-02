@@ -55,23 +55,49 @@ jobs:
 
           echo "needed=true" >> "$GITHUB_OUTPUT"
 
-      - name: Publish the upstream tip to the sync branch
+      - name: Merge upstream into the fork sync branch
+        id: merge
         if: steps.sync-state.outputs.needed == 'true'
-        run: git push --force origin upstream/main:"refs/heads/$SYNC_BRANCH"
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch --force-create "$SYNC_BRANCH" origin/main
+
+          if git merge --no-ff --no-edit upstream/main; then
+            python scripts/normalize_upstream_namespace.py
+            if ! git diff --quiet; then
+              git add --all
+              git commit -m "Normalize upstream changes for the timestamped namespace"
+            fi
+            git push --force origin "$SYNC_BRANCH"
+            echo "mode=integrated" >> "$GITHUB_OUTPUT"
+          else
+            git merge --abort
+            git push --force origin upstream/main:"refs/heads/$SYNC_BRANCH"
+            echo "mode=conflicted" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Open upstream sync pull request
         if: steps.sync-state.outputs.needed == 'true'
+        env:
+          SYNC_MODE: ${{ steps.merge.outputs.mode }}
         run: |
           upstream_sha=$(git rev-parse upstream/main)
+          if [ "$SYNC_MODE" = "integrated" ]; then
+            body="Upstream kyutai-labs/pocket-tts at ${upstream_sha} has been merged into this branch. The timestamped package namespace was normalized automatically.
+
+          Review the changes and merge this PR with a **merge commit**. Do not squash or rebase: preserving upstream ancestry prevents already-synchronized commits from appearing in future sync PRs."
+          else
+            body="Upstream kyutai-labs/pocket-tts at ${upstream_sha} could not be merged automatically, so this branch points at the exact upstream commit.
+
+          Resolve the conflicts locally, run scripts/normalize_upstream_namespace.py, and update this branch. Merge the PR with a **merge commit**; do not squash or rebase, so upstream ancestry is preserved."
+          fi
+
           gh pr create \
             --repo "$GITHUB_REPOSITORY" \
             --base main \
             --head "$SYNC_BRANCH" \
             --title "Sync upstream main" \
-            --body "Merge upstream kyutai-labs/pocket-tts at ${upstream_sha} into this fork.
-
-          This branch points at the exact upstream commit. Resolve any conflicts in this PR and
-          merge it with a **merge commit**. Do not squash or rebase: preserving upstream ancestry
-          prevents already-synchronized commits from appearing in future sync PRs.
+            --body "${body}
 
           Created by the weekly upstream synchronization workflow."

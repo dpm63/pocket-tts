@@ -4,9 +4,9 @@
 
 > [!IMPORTANT]
 > This is the `pocket-tts-timestamped` fork, which adds streaming word-level timestamps to
-> [Kyutai's Pocket TTS](https://github.com/kyutai-labs/pocket-tts). It keeps the `pocket_tts`
-> Python import and `pocket-tts` command, so do not install it alongside the upstream
-> `pocket-tts` distribution in the same environment.
+> [Kyutai's Pocket TTS](https://github.com/kyutai-labs/pocket-tts). It uses the
+> `pocket_tts_timestamped` Python import and `pocket-tts-timestamped` command, so it can be
+> installed alongside the upstream `pocket-tts` distribution.
 
 A lightweight text-to-speech (TTS) application designed to run efficiently on CPUs.
 Forget about the hassle of using GPUs and web APIs serving TTS models. With Kyutai's Pocket TTS, generating audio is just a pip install and a function call away.
@@ -47,16 +47,16 @@ Navigate to the [Kyutai website](https://kyutai.org/pocket-tts) to try it out di
 ## Trying it with the CLI
 
 ### The `generate` command
-You can use pocket-tts directly from the command line. We recommend using
+You can use pocket-tts-timestamped directly from the command line. We recommend using
 `uv` as it installs any dependencies on the fly in an isolated environment (uv installation instructions [here](https://docs.astral.sh/uv/getting-started/installation/#standalone-installer)).
 You can also use `pip install pocket-tts-timestamped` to install it manually.
 On Linux, see [CPU-only installation](#cpu-only-installation) to avoid pulling in the CUDA build of PyTorch.
 
 This will generate a wav file `./tts_output.wav` saying the default text with the default voice, and display some speed statistics.
 ```bash
-uvx --from pocket-tts-timestamped pocket-tts generate
+uvx --from pocket-tts-timestamped pocket-tts-timestamped generate
 # or if you installed it manually with pip:
-pocket-tts generate
+pocket-tts-timestamped generate
 ```
 Modify the voice with `--voice` and the text with `--text`. We provide a small catalog of voices.
 Choose a pretrained language model with `--language` when running `generate`, `export-voice`, or `serve` (default: `english`). Non-english languages have also biggers 24 layers variants that are higher quality but slower. You can select them by using for example `--language italian_24l`.
@@ -103,9 +103,9 @@ For trying multiple voices and prompts quickly, prefer using the `serve` command
 
 You can also run a local server to generate audio via HTTP requests.
 ```bash
-uvx --from pocket-tts-timestamped pocket-tts serve
+uvx --from pocket-tts-timestamped pocket-tts-timestamped serve
 # or if you installed it manually with pip:
-pocket-tts serve
+pocket-tts-timestamped serve
 ```
 Navigate to `http://localhost:8000` to try the web interface, it's faster than the command line as the model is kept in memory between requests.
 
@@ -141,7 +141,7 @@ pip install pocket-tts-timestamped --extra-index-url https://download.pytorch.or
 To run the CLI without installing, pass the same index to `uvx`:
 ```bash
 uvx --index https://download.pytorch.org/whl/cpu \
-  --from pocket-tts-timestamped pocket-tts generate
+  --from pocket-tts-timestamped pocket-tts-timestamped generate
 ```
 
 With `uv`, declare the index explicitly in your project:
@@ -159,7 +159,7 @@ This is not needed on macOS or Windows, where the default PyTorch wheels are alr
 
 You can use this package as a simple Python library to generate audio from text.
 ```python
-from pocket_tts import TTSModel
+from pocket_tts_timestamped import TTSModel
 import scipy.io.wavfile
 
 tts_model = TTSModel.load_model()
@@ -196,7 +196,7 @@ so we recommend to keep the model and voice states in memory if you can.
 
 For faster voice loading, you can export voice states to safetensors files:
 ```python
-from pocket_tts import TTSModel, export_model_state
+from pocket_tts_timestamped import TTSModel, export_model_state
 
 model = TTSModel.load_model()
 
@@ -296,7 +296,7 @@ We don't have official support for this yet, but you can try out one of these co
 
 To use a community model, just use the `--config` argument and point it to the url of the model's yaml file. For example:
 ```bash
-uvx --from pocket-tts-timestamped pocket-tts generate --config https://raw.githubusercontent.com/kyutai-labs/pocket-tts/refs/heads/main/pocket_tts/config/english_2026-04.yaml
+uvx --from pocket-tts-timestamped pocket-tts-timestamped generate --config https://raw.githubusercontent.com/kyutai-labs/pocket-tts/refs/heads/main/pocket_tts/config/english_2026-04.yaml
 ```
 
 It also works with huggingface urls like `hf://kyutai/pocket-tts/config/english_2026-04.yaml` or local paths like `./english_2026-04.yaml`.
@@ -306,23 +306,23 @@ The pre-made voices listed above are embeddings precomputed with our released we
 We recommend inserting the commit hash somehow in the url to avoid breaking changes by the model authors. For example:
 
 ```bash
-uvx --from pocket-tts-timestamped pocket-tts generate --config https://raw.githubusercontent.com/kyutai-labs/pocket-tts/891886a61a1ed45fd429a0a63bd96181e6cff637/pocket_tts/config/english_2026-04.yaml
+uvx --from pocket-tts-timestamped pocket-tts-timestamped generate --config https://raw.githubusercontent.com/kyutai-labs/pocket-tts/891886a61a1ed45fd429a0a63bd96181e6cff637/pocket_tts/config/english_2026-04.yaml
 ```
 or with `hf://...`
 ```bash
-uvx --from pocket-tts-timestamped pocket-tts generate --config hf://user/repo/config_file.yaml@commit_hash
+uvx --from pocket-tts-timestamped pocket-tts-timestamped generate --config hf://user/repo/config_file.yaml@commit_hash
 ```
 
 ### List of community-trained models
 
 - [pocket-tts-czech](https://huggingface.co/vvolhejn/pocket-tts-czech) by @vvolhejn (trained internally at Kyutai):
 ```bash
-uvx --from pocket-tts-timestamped pocket-tts generate --config hf://vvolhejn/pocket-tts-czech/czech.yaml@7b7760dd0fe994a0800f2fdbc837dc4b8f219d1c
+uvx --from pocket-tts-timestamped pocket-tts-timestamped generate --config hf://vvolhejn/pocket-tts-czech/czech.yaml@7b7760dd0fe994a0800f2fdbc837dc4b8f219d1c
 ```
 
 - [Pocket TTS Hindi](https://huggingface.co/saryps-labs/pocket-tts-hindi) by [Saryps Labs](https://huggingface.co/saryps-labs) (community research release):
 ```bash
-uvx --from pocket-tts-timestamped pocket-tts generate \
+uvx --from pocket-tts-timestamped pocket-tts-timestamped generate \
   --config hf://saryps-labs/pocket-tts-hindi/config.yaml@dbaa326069d20bfbdaeb625613736773741a24ea \
   --text "आज का दिन बहुत अच्छा है"
 ```

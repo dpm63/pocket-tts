@@ -5,7 +5,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from pocket_tts.modules.stateful_module import ModelState, StatefulModule
+from pocket_tts_timestamped.modules.stateful_module import ModelState, StatefulModule
 
 
 def get_extra_padding_for_conv1d(

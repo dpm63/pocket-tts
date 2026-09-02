@@ -5,21 +5,21 @@ from contextlib import contextmanager
 
 class PocketTTSFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
-        return record.name.startswith("pocket_tts")
+        return record.name.startswith("pocket_tts_timestamped")
 
 
 @contextmanager
 def enable_logging(library_name: str, level: int | str) -> Iterator[logging.Logger]:
     # Get the specific logger and its parent
     logger = logging.getLogger(library_name)
-    parent_logger = logging.getLogger("pocket_tts")
+    parent_logger = logging.getLogger("pocket_tts_timestamped")
 
     # Store original configuration
     old_level = logger.level
     old_parent_level = parent_logger.level
     old_handlers = parent_logger.handlers.copy()
 
-    # Configure logging format for pocket_tts logger
+    # Configure logging format for pocket_tts_timestamped logger
     parent_logger.setLevel(level)
 
     # Clear existing handlers and add our custom formatter with filter

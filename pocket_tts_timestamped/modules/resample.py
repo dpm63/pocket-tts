@@ -1,8 +1,8 @@
 import torch
 from torch import nn
 
-from pocket_tts.modules.conv import StreamingConv1d, StreamingConvTranspose1d
-from pocket_tts.modules.stateful_module import ModelState
+from pocket_tts_timestamped.modules.conv import StreamingConv1d, StreamingConvTranspose1d
+from pocket_tts_timestamped.modules.stateful_module import ModelState
 
 
 class ConvDownsample1d(nn.Module):

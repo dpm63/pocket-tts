@@ -1,6 +1,12 @@
-from pocket_tts.models.model_state import export_model_state
-from pocket_tts.models.tts_model import TTSModel
-from pocket_tts.timestamps import AudioChunk, TimestampedAudio, WordEnd, WordStart, WordTimestamp
+from pocket_tts_timestamped.models.model_state import export_model_state
+from pocket_tts_timestamped.models.tts_model import TTSModel
+from pocket_tts_timestamped.timestamps import (
+    AudioChunk,
+    TimestampedAudio,
+    WordEnd,
+    WordStart,
+    WordTimestamp,
+)
 
 # Public methods:
 # TTSModel.device

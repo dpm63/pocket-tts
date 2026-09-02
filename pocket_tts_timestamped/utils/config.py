@@ -6,7 +6,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, model_validator
 from typing_extensions import Self
 
-from pocket_tts.utils.utils import download_if_necessary
+from pocket_tts_timestamped.utils.utils import download_if_necessary
 
 CONFIGS_DIR = Path(__file__).parent.parent / "config"
 

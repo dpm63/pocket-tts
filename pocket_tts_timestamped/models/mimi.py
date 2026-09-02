@@ -4,13 +4,13 @@ from typing import NoReturn
 import torch
 from torch import nn
 
-from pocket_tts.modules.conv import pad_for_conv1d
-from pocket_tts.modules.dummy_quantizer import DummyQuantizer
-from pocket_tts.modules.resample import ConvDownsample1d, ConvTrUpsample1d
-from pocket_tts.modules.seanet import SEANetDecoder, SEANetEncoder
-from pocket_tts.modules.stateful_module import ModelState
-from pocket_tts.modules.transformer import ProjectedTransformer
-from pocket_tts.utils.config import MimiConfig
+from pocket_tts_timestamped.modules.conv import pad_for_conv1d
+from pocket_tts_timestamped.modules.dummy_quantizer import DummyQuantizer
+from pocket_tts_timestamped.modules.resample import ConvDownsample1d, ConvTrUpsample1d
+from pocket_tts_timestamped.modules.seanet import SEANetDecoder, SEANetEncoder
+from pocket_tts_timestamped.modules.stateful_module import ModelState
+from pocket_tts_timestamped.modules.transformer import ProjectedTransformer
+from pocket_tts_timestamped.utils.config import MimiConfig
 
 logger = logging.getLogger()
 
@@ -127,9 +127,9 @@ class MimiModel(nn.Module):
 
 def build_mimi(config: MimiConfig) -> MimiModel:
     """MimiModel from a pocket-tts config's `mimi` section."""
-    from pocket_tts.modules import transformer
-    from pocket_tts.modules.dummy_quantizer import DummyQuantizer
-    from pocket_tts.modules.seanet import SEANetDecoder, SEANetEncoder
+    from pocket_tts_timestamped.modules import transformer
+    from pocket_tts_timestamped.modules.dummy_quantizer import DummyQuantizer
+    from pocket_tts_timestamped.modules.seanet import SEANetDecoder, SEANetEncoder
 
     mimi_config = config.model_dump()
     encoder = SEANetEncoder(**mimi_config["seanet"])

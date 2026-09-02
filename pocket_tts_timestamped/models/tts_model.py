@@ -19,37 +19,44 @@ from torch import nn
 from torch.nn import functional as F
 from typing_extensions import Self
 
-from pocket_tts.data.audio import audio_read
-from pocket_tts.data.audio_utils import convert_audio
-from pocket_tts.default_parameters import (
+from pocket_tts_timestamped.data.audio import audio_read
+from pocket_tts_timestamped.data.audio_utils import convert_audio
+from pocket_tts_timestamped.default_parameters import (
     DEFAULT_EOS_THRESHOLD,
     DEFAULT_LANGUAGE,
     DEFAULT_NOISE_CLAMP,
     DEFAULT_SAMPLER_DECODE_STEPS,
     MAX_TOKEN_PER_CHUNK,
 )
-from pocket_tts.models.flow_lm import FlowLMModel
-from pocket_tts.models.mimi import build_mimi
-from pocket_tts.models.model_state import _import_model_state, _is_safetensors_source
-from pocket_tts.models.text_chunking import prepare_text_prompt, split_into_best_sentences
-from pocket_tts.modules.stateful_module import (
+from pocket_tts_timestamped.models.flow_lm import FlowLMModel
+from pocket_tts_timestamped.models.mimi import build_mimi
+from pocket_tts_timestamped.models.model_state import _import_model_state, _is_safetensors_source
+from pocket_tts_timestamped.models.text_chunking import (
+    prepare_text_prompt,
+    split_into_best_sentences,
+)
+from pocket_tts_timestamped.modules.stateful_module import (
     ModelState,
     StatefulModule,
     increment_steps,
     init_states,
 )
-from pocket_tts.quantization import RECOMMENDED_CONFIG, apply_dynamic_int8
-from pocket_tts.timestamps.alignment import SelectedAttentionCapture, WordAlignment, is_voiced
-from pocket_tts.timestamps.records import (
+from pocket_tts_timestamped.quantization import RECOMMENDED_CONFIG, apply_dynamic_int8
+from pocket_tts_timestamped.timestamps.alignment import (
+    SelectedAttentionCapture,
+    WordAlignment,
+    is_voiced,
+)
+from pocket_tts_timestamped.timestamps.records import (
     AudioChunk,
     TimestampedAudio,
     TimestampEvent,
     WordEnd,
     WordTimestamp,
 )
-from pocket_tts.timestamps.text import TimestampTextChunk, _iter_timestamp_text_chunks
-from pocket_tts.utils.config import CONFIGS_DIR, Config, load_config
-from pocket_tts.utils.utils import (
+from pocket_tts_timestamped.timestamps.text import TimestampTextChunk, _iter_timestamp_text_chunks
+from pocket_tts_timestamped.utils.config import CONFIGS_DIR, Config, load_config
+from pocket_tts_timestamped.utils.utils import (
     _ORIGINS_OF_PREDEFINED_VOICES,
     DEBUG_MIMI,
     display_execution_time,
@@ -57,7 +64,7 @@ from pocket_tts.utils.utils import (
     get_predefined_voice,
     size_of_dict,
 )
-from pocket_tts.utils.weights_loading import (
+from pocket_tts_timestamped.utils.weights_loading import (
     get_flow_lm_state_dict,
     get_mimi_state_dict,
     get_training_checkpoint_state_dicts,
@@ -305,7 +312,7 @@ class TTSModel(nn.Module):
                 the `config` argument. Available options
                 are `"english_2026-01"`, `"english_2026-04"`, `"english"`, `"french_24l"`, `"german_24l"`, `"portuguese"`, `"italian"`, `"spanish_24l"`.
                 If neither `config` nor `language` is provided, defaults to `"english", which is the same model as 'english_2026-04'`.
-            config: A path to a custom YAML config file: a local path (e.g., `"C://pocket_tts/pocket_tts_config.yaml"`),
+            config: A path to a custom YAML config file: a local path (e.g., `"C://pocket_tts_timestamped/pocket_tts_timestamped_config.yaml"`),
                 an `https://` URL, or an `hf://` path (e.g. `"hf://<repo_id>/<path>[@revision]"`).
             temp: Sampling temperature for generation. Higher values produce more
                 diverse but potentially lower quality output. If None, defaults to
@@ -339,7 +346,7 @@ class TTSModel(nn.Module):
 
         Example:
             ```python
-            from pocket_tts import TTSModel
+            from pocket_tts_timestamped import TTSModel
 
             # Load with default settings
             model = TTSModel.load_model()
@@ -646,7 +653,7 @@ class TTSModel(nn.Module):
 
         Example:
             ```python
-            from pocket_tts import TTSModel
+            from pocket_tts_timestamped import TTSModel
 
             model = TTSModel.load_model()
 
@@ -712,7 +719,7 @@ class TTSModel(nn.Module):
 
         Example:
             ```python
-            from pocket_tts import TTSModel
+            from pocket_tts_timestamped import TTSModel
 
             model = TTSModel.load_model()
 
@@ -1163,7 +1170,7 @@ class TTSModel(nn.Module):
 
         Example:
             ```python
-            from pocket_tts import TTSModel
+            from pocket_tts_timestamped import TTSModel
 
             model = TTSModel.load_model()
             # From HuggingFace URL

@@ -3,16 +3,19 @@ import torch.nn as nn
 from torch.nn import functional as F
 from typing_extensions import Self
 
-from pocket_tts.modules.attention import StreamingMultiheadAttention, _cached_causal_mask
-from pocket_tts.modules.layer_scale import LayerScale
-from pocket_tts.modules.rope import RotaryEmbedding
-from pocket_tts.modules.stateful_module import ModelState
-from pocket_tts.timestamps.alignment import SelectedAttentionCapture
-from pocket_tts.utils.config import FlowLMTransformerConfig
+from pocket_tts_timestamped.modules.attention import (
+    StreamingMultiheadAttention,
+    _cached_causal_mask,
+)
+from pocket_tts_timestamped.modules.layer_scale import LayerScale
+from pocket_tts_timestamped.modules.rope import RotaryEmbedding
+from pocket_tts_timestamped.modules.stateful_module import ModelState
+from pocket_tts_timestamped.timestamps.alignment import SelectedAttentionCapture
+from pocket_tts_timestamped.utils.config import FlowLMTransformerConfig
 
 
 class StreamingTransformerLayer(nn.Module):
-    # nn.Linear when built; quantization (pocket_tts.quantization) swaps in the
+    # nn.Linear when built; quantization (pocket_tts_timestamped.quantization) swaps in the
     # backend's int8 dynamic Linear, which is not an nn.Linear subclass.
     linear1: nn.Module
     linear2: nn.Module

@@ -6,7 +6,7 @@ boundaries and regrouped into chunks that fit `max_tokens`.
 
 import logging
 
-from pocket_tts.modules.text_conditioner import SentencePieceTokenizer
+from pocket_tts_timestamped.modules.text_conditioner import SentencePieceTokenizer
 
 logger = logging.getLogger(__name__)
 

@@ -4,7 +4,7 @@ import sentencepiece
 import torch
 from torch import nn
 
-from pocket_tts.utils.utils import download_if_necessary
+from pocket_tts_timestamped.utils.utils import download_if_necessary
 
 logger = logging.getLogger(__name__)
 

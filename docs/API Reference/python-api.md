@@ -11,7 +11,7 @@ pip install pocket-tts-timestamped
 ## Quick Start
 
 ```python
-from pocket_tts import TTSModel
+from pocket_tts_timestamped import TTSModel
 import scipy.io.wavfile
 
 # Load the model
@@ -55,7 +55,7 @@ Load and return a TTSModel instance with pre-trained weights.
 
 **Example:**
 ```python
-from pocket_tts import TTSModel
+from pocket_tts_timestamped import TTSModel
 
 # Load with default settings
 model = TTSModel.load_model()
@@ -74,7 +74,7 @@ Returns the device type where the model is running ("cpu" or "cuda").
 By default, the model runs on CPU.
 
 ```python
-from pocket_tts import TTSModel
+from pocket_tts_timestamped import TTSModel
 
 model = TTSModel.load_model()
 print(f"Model running on: {model.device}")
@@ -85,7 +85,7 @@ print(f"Model running on: {model.device}")
 Returns the generated audio sample rate (typically 24000 Hz).
 
 ```python
-from pocket_tts import TTSModel
+from pocket_tts_timestamped import TTSModel
 
 model = TTSModel.load_model()
 print(f"Sample rate: {model.sample_rate} Hz")
@@ -106,7 +106,7 @@ Extract model state for a given audio file or URL (voice cloning), or load from 
 
 **Example:**
 ```python
-from pocket_tts import TTSModel
+from pocket_tts_timestamped import TTSModel
 
 model = TTSModel.load_model()
 # From HuggingFace URL
@@ -140,7 +140,7 @@ Generate complete audio tensor from text input.
 
 **Example:**
 ```python
-from pocket_tts import TTSModel
+from pocket_tts_timestamped import TTSModel
 
 model = TTSModel.load_model()
 
@@ -164,7 +164,7 @@ Generate audio streaming chunks from text input.
 
 **Example:**
 ```python
-from pocket_tts import TTSModel
+from pocket_tts_timestamped import TTSModel
 
 model = TTSModel.load_model()
 
@@ -206,7 +206,7 @@ Generate audio streaming chunks and word timestamps from text input.
 
 **Example:**
 ```python
-from pocket_tts import AudioChunk, WordEnd, WordStart
+from pocket_tts_timestamped import AudioChunk, WordEnd, WordStart
 
 stream = model.generate_audio_with_timestamps_stream(voice_state, "Hello world!")
 for event in stream:
@@ -232,7 +232,7 @@ You can then load it again with the method `get_state_for_audio_prompt()`.
 
 **Example:**
 ```python
-from pocket_tts import TTSModel, export_model_state
+from pocket_tts_timestamped import TTSModel, export_model_state
 
 model = TTSModel.load_model()
 
@@ -254,7 +254,7 @@ model_state_for_voice_copy = model.get_state_for_audio_prompt("my_voice.safetens
 ### Voice Management
 
 ```python
-from pocket_tts import TTSModel
+from pocket_tts_timestamped import TTSModel
 
 model = TTSModel.load_model()
 # Preload multiple voices
@@ -274,7 +274,7 @@ funny_audio = model.generate_audio(voices["funny"], "Good morning.")
 ### Batch Processing
 
 ```python
-from pocket_tts import TTSModel
+from pocket_tts_timestamped import TTSModel
 import scipy.io.wavfile
 import torch
 

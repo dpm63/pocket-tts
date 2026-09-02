@@ -15,8 +15,8 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 
-from pocket_tts.data.audio import stream_audio_chunks
-from pocket_tts.default_parameters import (
+from pocket_tts_timestamped.data.audio import stream_audio_chunks
+from pocket_tts_timestamped.default_parameters import (
     DEFAULT_EOS_THRESHOLD,
     DEFAULT_FRAMES_AFTER_EOS,
     DEFAULT_NOISE_CLAMP,
@@ -25,11 +25,11 @@ from pocket_tts.default_parameters import (
     get_default_text_for_language,
     get_default_voice_for_language,
 )
-from pocket_tts.models.model_state import export_model_state
-from pocket_tts.models.tts_model import TTSModel
-from pocket_tts.modules.stateful_module import ModelState
-from pocket_tts.utils.logging_utils import enable_logging
-from pocket_tts.utils.utils import _ORIGINS_OF_PREDEFINED_VOICES
+from pocket_tts_timestamped.models.model_state import export_model_state
+from pocket_tts_timestamped.models.tts_model import TTSModel
+from pocket_tts_timestamped.modules.stateful_module import ModelState
+from pocket_tts_timestamped.utils.logging_utils import enable_logging
+from pocket_tts_timestamped.utils.utils import _ORIGINS_OF_PREDEFINED_VOICES
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ cli_app = typer.Typer(
 
 
 # ------------------------------------------------------
-# The pocket-tts server implementation
+# The pocket-tts-timestamped server implementation
 # ------------------------------------------------------
 
 # Global model instance
@@ -66,7 +66,9 @@ web_app.add_middleware(
 
 def _loaded_model() -> TTSModel:
     if tts_model is None:
-        raise RuntimeError("no model loaded: `pocket-tts serve` loads it before serving requests")
+        raise RuntimeError(
+            "no model loaded: `pocket-tts-timestamped serve` loads it before serving requests"
+        )
     return tts_model
 
 
@@ -240,11 +242,11 @@ def serve(
     # the first request, which would otherwise pay for the encoding of the audio file.
     default_voice_state = tts_model.get_state_for_audio_prompt(default_voice)
 
-    uvicorn.run("pocket_tts.main:web_app", host=host, port=port, reload=reload)
+    uvicorn.run("pocket_tts_timestamped.main:web_app", host=host, port=port, reload=reload)
 
 
 # ------------------------------------------------------
-# The pocket-tts single generation CLI implementation
+# The pocket-tts-timestamped single generation CLI implementation
 # ------------------------------------------------------
 
 
@@ -328,7 +330,7 @@ def generate(
         logger.warning("--lsd-decode-steps is deprecated, use --sampler-decode-steps")
         sampler_decode_steps = lsd_decode_steps
     log_level = logging.ERROR if quiet else logging.INFO
-    with enable_logging("pocket_tts", log_level):
+    with enable_logging("pocket_tts_timestamped", log_level):
         if text is None:
             text = get_default_text_for_language(language)
         if text == "-":
@@ -412,7 +414,7 @@ def export_voice(
     """Convert and save audio to .safetensors file"""
 
     log_level = logging.ERROR if quiet else logging.INFO
-    with enable_logging("pocket_tts", log_level):
+    with enable_logging("pocket_tts_timestamped", log_level):
         tts_model = TTSModel.load_model(language=language, config=config)
         model_state = tts_model.get_state_for_audio_prompt(
             audio_conditioning=audio_path, truncate=True

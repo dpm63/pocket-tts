@@ -10,7 +10,7 @@ import torch
 from torch import nn
 from typing_extensions import Self
 
-from pocket_tts.utils.config import FlowLMConfig
+from pocket_tts_timestamped.utils.config import FlowLMConfig
 
 
 def modulate(x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
