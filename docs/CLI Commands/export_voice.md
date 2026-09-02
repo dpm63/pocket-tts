@@ -7,7 +7,7 @@ The `export-voice` command allows you to convert an audio file to a voice embedd
 ## Basic Usage
 
 ```bash
-uvx pocket-tts export-voice audio-path export-path
+uvx --from pocket-tts-timestamped pocket-tts export-voice audio-path export-path
 # or if installed manually:
 pocket-tts export-voice audio-path export-path
 ```

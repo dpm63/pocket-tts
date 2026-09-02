@@ -6,6 +6,7 @@ and a teacher path pointing at an architecture the distill step cannot load.
 """
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -57,7 +58,8 @@ def test_distill_teacher_is_deeper_than_its_student():
 def test_distill_teacher_weights_point_at_the_scratch_run():
     args = load_args(DISTILL)
     assert args.distill_teacher_weights, "the distill config must name a teacher checkpoint"
-    assert str(load_args(SCRATCH).run_dir) in args.distill_teacher_weights, (
+    teacher_weights = Path(args.distill_teacher_weights)
+    assert load_args(SCRATCH).run_dir in teacher_weights.parents, (
         "the documented path is scratch -> distill; the teacher checkpoint should come from "
         f"{load_args(SCRATCH).run_dir}"
     )
@@ -72,8 +74,9 @@ class TestArgValidation:
 
     def test_zero_frequencies_are_rejected(self):
         for field in ("valid_freq", "ckpt_freq", "log_freq"):
+            kwargs: dict[str, Any] = {field: 0}
             with pytest.raises(ValueError, match=field):
-                TrainArgs(**{field: 0})
+                TrainArgs(**kwargs)
 
     def test_distillation_without_a_teacher_is_rejected(self):
         with pytest.raises(ValueError, match="teacher"):

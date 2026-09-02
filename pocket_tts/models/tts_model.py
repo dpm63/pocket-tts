@@ -6,8 +6,10 @@ import queue
 import statistics
 import threading
 import time
+from collections.abc import Generator, Iterator
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 import safetensors
 import safetensors.torch
@@ -30,8 +32,22 @@ from pocket_tts.models.flow_lm import FlowLMModel
 from pocket_tts.models.mimi import build_mimi
 from pocket_tts.models.model_state import _import_model_state, _is_safetensors_source
 from pocket_tts.models.text_chunking import prepare_text_prompt, split_into_best_sentences
-from pocket_tts.modules.stateful_module import StatefulModule, increment_steps, init_states
+from pocket_tts.modules.stateful_module import (
+    ModelState,
+    StatefulModule,
+    increment_steps,
+    init_states,
+)
 from pocket_tts.quantization import RECOMMENDED_CONFIG, apply_dynamic_int8
+from pocket_tts.timestamps.alignment import SelectedAttentionCapture, WordAlignment, is_voiced
+from pocket_tts.timestamps.records import (
+    AudioChunk,
+    TimestampedAudio,
+    TimestampEvent,
+    WordEnd,
+    WordTimestamp,
+)
+from pocket_tts.timestamps.text import TimestampTextChunk, _iter_timestamp_text_chunks
 from pocket_tts.utils.config import CONFIGS_DIR, Config, load_config
 from pocket_tts.utils.utils import (
     _ORIGINS_OF_PREDEFINED_VOICES,
@@ -50,8 +66,15 @@ from pocket_tts.utils.weights_loading import (
 torch.set_num_threads(1)
 logger = logging.getLogger(__name__)
 
+# Generated latents handed to a Mimi decoder thread; timestamp generation pairs
+# each latent with its reduced attention scores. None closes either stream.
+LatentItem = torch.Tensor | tuple[torch.Tensor, torch.Tensor]
+LatentQueue = queue.Queue[LatentItem | None]
+# Decoder thread -> generator: ("chunk", audio), ("done", None) or ("error", exception).
+ResultQueue = queue.Queue[tuple[str, Any]]
 
-def stamp_state_names(tts_model) -> None:
+
+def stamp_state_names(tts_model: "TTSModel") -> None:
     """StatefulModules find their slice of the state dict by absolute name."""
     for top_module in (tts_model.flow_lm, tts_model.mimi):
         for module_name, module in top_module.named_modules():
@@ -79,12 +102,13 @@ class TTSModel(nn.Module):
         temp: float,
         sampler_decode_steps: int,
         noise_clamp: float | None,
-        eos_threshold,
+        eos_threshold: float,
         config: Config,
         origin: Path | None = None,
         pad_with_spaces_for_short_inputs: bool = False,
         model_recommended_frames_after_eos: int | None = None,
         remove_semicolons: bool = False,
+        append_terminal_punctuation: bool = True,
     ):
         super().__init__()
         self.flow_lm = flow_lm
@@ -98,6 +122,7 @@ class TTSModel(nn.Module):
         self.pad_with_spaces_for_short_inputs: bool = pad_with_spaces_for_short_inputs
         self.model_recommended_frames_after_eos = model_recommended_frames_after_eos
         self.remove_semicolons = remove_semicolons
+        self.append_terminal_punctuation = append_terminal_punctuation
 
     @property
     def device(self) -> torch.device:
@@ -111,10 +136,10 @@ class TTSModel(nn.Module):
     def _from_pydantic_config(
         cls,
         config: Config,
-        temp,
-        sampler_decode_steps,
+        temp: float,
+        sampler_decode_steps: int,
         noise_clamp: float | None,
-        eos_threshold,
+        eos_threshold: float,
         origin: Path | None,
     ) -> Self:
         flow_lm = FlowLMModel.from_pydantic_config(
@@ -133,12 +158,13 @@ class TTSModel(nn.Module):
             pad_with_spaces_for_short_inputs=config.pad_with_spaces_for_short_inputs,
             model_recommended_frames_after_eos=config.model_recommended_frames_after_eos,
             remove_semicolons=config.remove_semicolons,
+            append_terminal_punctuation=config.append_terminal_punctuation,
         )
         return tts_model
 
     has_custom_weights: bool = False
 
-    def load_training_checkpoint(self, path: str | Path, use_ema: bool = True) -> None:
+    def load_training_checkpoint(self, path: str | Path, use_ema: bool = True):
         """Load weights from a training checkpoint (.pt) into a config-built model."""
         self.has_custom_weights = True
         flow_lm_state, mimi_state = get_training_checkpoint_state_dicts(Path(path), use_ema)
@@ -168,6 +194,8 @@ class TTSModel(nn.Module):
             try:
                 bundle = download_if_necessary(config.weights_path)
             except Exception:
+                if config.weights_path_without_voice_cloning is None:
+                    raise
                 self.has_voice_cloning = False
                 bundle = download_if_necessary(config.weights_path_without_voice_cloning)
             bundled = safetensors.torch.load_file(bundle)
@@ -182,10 +210,10 @@ class TTSModel(nn.Module):
     def _from_pydantic_config_with_weights(
         cls,
         config: Config,
-        temp,
-        sampler_decode_steps,
+        temp: float,
+        sampler_decode_steps: int,
         noise_clamp: float | None,
-        eos_threshold,
+        eos_threshold: float,
         origin: Path | None = None,
     ) -> Self:
         tts_model = cls._from_pydantic_config(
@@ -231,6 +259,8 @@ class TTSModel(nn.Module):
             try:
                 weights_file = download_if_necessary(config.weights_path)
             except Exception:
+                if config.weights_path_without_voice_cloning is None:
+                    raise
                 tts_model.has_voice_cloning = False
                 weights_file = download_if_necessary(config.weights_path_without_voice_cloning)
 
@@ -295,7 +325,8 @@ class TTSModel(nn.Module):
                 attention and FFN layers. Reduces runtime memory by ~48% and improves
                 inference speed by ~27% on x86 (FBGEMM).
                 No measurable impact on speech quality (WER unchanged).
-                For optimized performance, install torchao: ``pip install pocket-tts[quantize]``
+                For optimized performance, install torchao:
+                ``pip install pocket-tts-timestamped[quantize]``
 
         Returns:
             TTSModel: Fully initialized model with loaded weights on cpu, ready for
@@ -340,20 +371,20 @@ class TTSModel(nn.Module):
         )
         if Path(suffix_source).suffix not in (".yaml", ".yml"):
             raise ValueError("Config should be a path to a YAML file ending with .yaml")
-        config = load_config(config_path)
+        model_config = load_config(config_path)
         if temp is None:
-            temp = config.default_temperature
+            temp = model_config.default_temperature
         logger.info(f"Loading model from config at {config_path}...")
 
         origin = Path(config_path)
         if checkpoint is not None:
-            tts_model = TTSModel._from_pydantic_config(
-                config, temp, sampler_decode_steps, noise_clamp, eos_threshold, origin=origin
+            tts_model = cls._from_pydantic_config(
+                model_config, temp, sampler_decode_steps, noise_clamp, eos_threshold, origin=origin
             )
             tts_model.load_training_checkpoint(checkpoint)
         else:
-            tts_model = TTSModel._from_pydantic_config_with_weights(
-                config, temp, sampler_decode_steps, noise_clamp, eos_threshold, origin=origin
+            tts_model = cls._from_pydantic_config_with_weights(
+                model_config, temp, sampler_decode_steps, noise_clamp, eos_threshold, origin=origin
             )
 
         if quantize:
@@ -363,10 +394,11 @@ class TTSModel(nn.Module):
 
     def _run_flow_lm_and_increment_step(
         self,
-        model_state: dict,
+        model_state: ModelState,
         text_tokens: torch.Tensor | None = None,
         backbone_input_latents: torch.Tensor | None = None,
         audio_conditioning: torch.Tensor | None = None,
+        attention_capture: SelectedAttentionCapture | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """First one is the backbone output, second one is the audio decoding output."""
         if text_tokens is None:
@@ -385,6 +417,7 @@ class TTSModel(nn.Module):
             backbone_input_latents=backbone_input_latents,
             model_state=model_state,
             audio_conditioning=audio_conditioning,
+            attention_capture=attention_capture,
         )
         increment_by = (
             text_tokens.shape[1] + backbone_input_latents.shape[1] + audio_conditioning.shape[1]
@@ -394,10 +427,11 @@ class TTSModel(nn.Module):
 
     def _run_flow_lm(
         self,
-        model_state: dict,
+        model_state: ModelState,
         text_tokens: torch.Tensor,
         backbone_input_latents: torch.Tensor,
         audio_conditioning: torch.Tensor,
+        attention_capture: SelectedAttentionCapture | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         text_embeddings = self.flow_lm.conditioner(text_tokens)
         text_embeddings = torch.cat([text_embeddings, audio_conditioning], dim=1)
@@ -410,6 +444,7 @@ class TTSModel(nn.Module):
             temp=self.temp,
             noise_clamp=self.noise_clamp,
             eos_threshold=self.eos_threshold,
+            attention_capture=attention_capture,
         )
         return output_embeddings[:, None, :], is_eos
 
@@ -430,7 +465,7 @@ class TTSModel(nn.Module):
         conditioning = F.linear(latents, self.flow_lm.speaker_proj_weight)
         return conditioning
 
-    def _expand_kv_cache(self, model_state: dict, sequence_length: int) -> None:
+    def _expand_kv_cache(self, model_state: ModelState, sequence_length: int):
         """Expand KV cache back to full sequence_length for generation.
 
         When a model state is retrieved from cache with sliced KV caches,
@@ -463,7 +498,7 @@ class TTSModel(nn.Module):
                     expanded_cache[:, :, :current_length, :, :] = cache
                     module_state["cache"] = expanded_cache
 
-    def _flow_lm_current_end(self, model_state: dict) -> int:
+    def _flow_lm_current_end(self, model_state: ModelState) -> int:
         for module_state in model_state.values():
             offset = module_state.get("offset")
             if offset is not None:
@@ -476,11 +511,11 @@ class TTSModel(nn.Module):
     @torch.no_grad
     def _decode_audio_worker(
         self,
-        latents_queue: queue.Queue,
-        result_queue: queue.Queue,
+        latents_queue: LatentQueue,
+        result_queue: ResultQueue,
         mimi_sequence_length: int,
         mimi_steps_per_latent: int,
-    ):
+    ) -> None:
         """Worker thread function for decoding audio latents from queue with immediate streaming."""
         try:
             audio_chunks = []
@@ -489,6 +524,8 @@ class TTSModel(nn.Module):
                 latent = latents_queue.get()
                 if latent is None:
                     break
+                if not isinstance(latent, torch.Tensor):
+                    raise TypeError("Ordinary audio decoding received timestamp attention scores")
                 mimi_decoding_input = latent * self.flow_lm.emb_std + self.flow_lm.emb_mean
 
                 t = time.monotonic()
@@ -515,9 +552,60 @@ class TTSModel(nn.Module):
             result_queue.put(("error", e))
 
     @torch.no_grad
+    def _decode_timestamped_audio_worker(
+        self,
+        latents_queue: LatentQueue,
+        result_queue: ResultQueue,
+        mimi_sequence_length: int,
+        mimi_steps_per_latent: int,
+        alignment: WordAlignment,
+        time_offset: float,
+        cancel_event: threading.Event,
+    ) -> None:
+        try:
+            mimi_state = init_states(self.mimi, batch_size=1, sequence_length=mimi_sequence_length)
+            generated_samples = 0
+            while True:
+                item = latents_queue.get()
+                if item is None or cancel_event.is_set():
+                    break
+                if isinstance(item, torch.Tensor):
+                    raise TypeError("Timestamp audio decoding requires attention scores")
+                latent, unit_scores = item
+                mimi_decoding_input = latent * self.flow_lm.emb_std + self.flow_lm.emb_mean
+                audio_frame = self.mimi.decode_from_latent(mimi_decoding_input, mimi_state)
+                increment_steps(self.mimi, mimi_state, increment=mimi_steps_per_latent)
+
+                frame_audio = audio_frame[0, 0]
+                frame_start = time_offset + generated_samples / self.sample_rate
+                generated_samples += frame_audio.shape[-1]
+                frame_end = time_offset + generated_samples / self.sample_rate
+                voiced = is_voiced(frame_audio)
+                events = alignment.process_frame(unit_scores, voiced, frame_start)
+                for event in events:
+                    result_queue.put(("event", event))
+                result_queue.put(
+                    (
+                        "event",
+                        AudioChunk(audio=frame_audio, start_time=frame_start, end_time=frame_end),
+                    )
+                )
+                latents_queue.task_done()
+
+            if cancel_event.is_set():
+                return
+
+            audio_end = time_offset + generated_samples / self.sample_rate
+            for event in alignment.finish(audio_end):
+                result_queue.put(("event", event))
+            result_queue.put(("done", audio_end))
+        except Exception as error:
+            result_queue.put(("error", error))
+
+    @torch.no_grad
     def generate_audio(
         self,
-        model_state: dict,
+        model_state: ModelState,
         text_to_generate: str,
         max_tokens: int = MAX_TOKEN_PER_CHUNK,
         frames_after_eos: int | None = None,
@@ -585,12 +673,12 @@ class TTSModel(nn.Module):
     @torch.no_grad
     def generate_audio_stream(
         self,
-        model_state: dict,
+        model_state: ModelState,
         text_to_generate: str,
         max_tokens: int = MAX_TOKEN_PER_CHUNK,
         frames_after_eos: int | None = None,
         copy_state: bool = True,
-    ):
+    ) -> Iterator[torch.Tensor]:
         """Generate audio streaming chunks from text input.
 
         This method generates audio from text and yields chunks as they become
@@ -654,11 +742,15 @@ class TTSModel(nn.Module):
             max_tokens,
             self.pad_with_spaces_for_short_inputs,
             remove_semicolons=self.remove_semicolons,
+            append_terminal_punctuation=self.append_terminal_punctuation,
         )
 
         for chunk in chunks:
             text_to_generate, frames_after_eos_guess = prepare_text_prompt(
-                chunk, self.pad_with_spaces_for_short_inputs, self.remove_semicolons
+                chunk,
+                self.pad_with_spaces_for_short_inputs,
+                self.remove_semicolons,
+                self.append_terminal_punctuation,
             )
             frames_after_eos_guess += 2
             effective_frames = (
@@ -671,10 +763,196 @@ class TTSModel(nn.Module):
                 copy_state=copy_state,
             )
 
+    def generate_audio_with_timestamps(
+        self,
+        model_state: ModelState,
+        text_to_generate: str,
+        max_tokens: int = MAX_TOKEN_PER_CHUNK,
+        frames_after_eos: int | None = None,
+        copy_state: bool = True,
+    ) -> TimestampedAudio:
+        """Generate audio and completed word-level timestamps."""
+
+        stream = self.generate_audio_with_timestamps_stream(
+            model_state=model_state,
+            text_to_generate=text_to_generate,
+            max_tokens=max_tokens,
+            frames_after_eos=frames_after_eos,
+            copy_state=copy_state,
+        )
+        audio_chunks = []
+        words = []
+        for event in stream:
+            if isinstance(event, AudioChunk):
+                audio_chunks.append(event.audio)
+            elif isinstance(event, WordEnd):
+                words.append(
+                    WordTimestamp(event.word, event.word_index, event.start_time, event.end_time)
+                )
+        audio = (
+            torch.cat(audio_chunks, dim=0)
+            if audio_chunks
+            else torch.empty(0, dtype=torch.float32, device=self.device)
+        )
+        return TimestampedAudio(audio=audio, words=tuple(words))
+
+    def generate_audio_with_timestamps_stream(
+        self,
+        model_state: ModelState,
+        text_to_generate: str,
+        max_tokens: int = MAX_TOKEN_PER_CHUNK,
+        frames_after_eos: int | None = None,
+        copy_state: bool = True,
+    ) -> Iterator[TimestampEvent]:
+        """Stream tagged audio chunks and word start/end events."""
+
+        if self.config.timestamp_heads is None:
+            raise ValueError(
+                "Word timestamps are not supported by this model config because "
+                "timestamp_heads is absent. Use generate_audio() or "
+                "generate_audio_stream() for ordinary generation."
+            )
+        return self._generate_audio_with_timestamps_events(
+            model_state=model_state,
+            text_to_generate=text_to_generate,
+            max_tokens=max_tokens,
+            frames_after_eos=frames_after_eos,
+            copy_state=copy_state,
+        )
+
+    @torch.no_grad
+    def _generate_audio_with_timestamps_events(
+        self,
+        model_state: ModelState,
+        text_to_generate: str,
+        max_tokens: int,
+        frames_after_eos: int | None,
+        copy_state: bool,
+    ) -> Iterator[TimestampEvent]:
+        if frames_after_eos is None:
+            frames_after_eos = self.model_recommended_frames_after_eos
+        chunks = split_into_best_sentences(
+            self.flow_lm.conditioner.tokenizer,
+            text_to_generate,
+            max_tokens,
+            self.pad_with_spaces_for_short_inputs,
+            remove_semicolons=self.remove_semicolons,
+            append_terminal_punctuation=self.append_terminal_punctuation,
+        )
+        timestamp_chunks = _iter_timestamp_text_chunks(
+            text_to_generate, chunks, self.flow_lm.conditioner.tokenizer.sp, best_effort=True
+        )
+        time_offset = 0.0
+        for timestamp_chunk in timestamp_chunks:
+            _, frames_after_eos_guess = prepare_text_prompt(
+                timestamp_chunk.text,
+                self.pad_with_spaces_for_short_inputs,
+                self.remove_semicolons,
+                self.append_terminal_punctuation,
+            )
+            effective_frames = (
+                frames_after_eos if frames_after_eos is not None else frames_after_eos_guess + 2
+            )
+            time_offset = yield from self._generate_audio_with_timestamps_short_text(
+                model_state=model_state,
+                timestamp_chunk=timestamp_chunk,
+                frames_after_eos=effective_frames,
+                copy_state=copy_state,
+                time_offset=time_offset,
+            )
+
+    @torch.no_grad
+    def _generate_audio_with_timestamps_short_text(
+        self,
+        model_state: ModelState,
+        timestamp_chunk: TimestampTextChunk,
+        frames_after_eos: int,
+        copy_state: bool,
+        time_offset: float,
+    ) -> Generator[TimestampEvent, None, float]:
+        if copy_state:
+            model_state = copy.deepcopy(model_state)
+
+        prepared = self._prepare_timestamp_text_chunk(timestamp_chunk)
+        token_count = prepared.shape[1]
+        if timestamp_chunk.token_to_unit.shape[0] != token_count:
+            raise RuntimeError("Timestamp token mapping does not match FlowLM tokenization")
+        max_gen_len = self._estimate_max_gen_len(token_count)
+        mimi_steps_per_latent = int(self.mimi.encoder_frame_rate / self.mimi.frame_rate)
+        mimi_sequence_length = max_gen_len * mimi_steps_per_latent
+        text_start = self._flow_lm_current_end(model_state)
+        selected_heads = tuple(
+            (selected.layer, selected.head) for selected in self.config.timestamp_heads or ()
+        )
+        capture = SelectedAttentionCapture(
+            heads=selected_heads,
+            text_start=text_start,
+            text_end=text_start + token_count,
+            token_to_unit=timestamp_chunk.token_to_unit,
+        )
+        alignment = WordAlignment(timestamp_chunk.units)
+
+        latents_queue: LatentQueue = queue.Queue()
+        result_queue: ResultQueue = queue.Queue()
+        cancel_event = threading.Event()
+        decoder_thread = threading.Thread(
+            target=self._decode_timestamped_audio_worker,
+            args=(
+                latents_queue,
+                result_queue,
+                mimi_sequence_length,
+                mimi_steps_per_latent,
+                alignment,
+                time_offset,
+                cancel_event,
+            ),
+            daemon=True,
+        )
+        decoder_thread.start()
+        generation_thread: threading.Thread | None = None
+        audio_end = time_offset
+        try:
+            generation_thread = self._generate(
+                model_state=model_state,
+                prepared=prepared,
+                max_gen_len=max_gen_len,
+                frames_after_eos=frames_after_eos,
+                latents_queue=latents_queue,
+                result_queue=result_queue,
+                attention_capture=capture,
+                cancel_event=cancel_event,
+            )
+
+            while True:
+                kind, value = result_queue.get()
+                if kind == "event":
+                    yield value
+                elif kind == "done":
+                    audio_end = value
+                    break
+                elif kind == "error":
+                    raise value
+        finally:
+            cancel_event.set()
+            latents_queue.put(None)
+            if generation_thread is not None:
+                generation_thread.join()
+            decoder_thread.join()
+        return audio_end
+
+    def _prepare_timestamp_text_chunk(self, timestamp_chunk: TimestampTextChunk) -> torch.Tensor:
+        if timestamp_chunk.prepared_tokens is None:
+            return self.flow_lm.conditioner.prepare(timestamp_chunk.text)
+        return timestamp_chunk.prepared_tokens.to(self.flow_lm.device)
+
     @torch.no_grad
     def _generate_audio_stream_short_text(
-        self, model_state: dict, text_to_generate: str, frames_after_eos: int, copy_state: bool
-    ):
+        self,
+        model_state: ModelState,
+        text_to_generate: str,
+        frames_after_eos: int,
+        copy_state: bool,
+    ) -> Iterator[torch.Tensor]:
         if copy_state:
             model_state = copy.deepcopy(model_state)
 
@@ -685,8 +963,8 @@ class TTSModel(nn.Module):
         mimi_sequence_length = max_gen_len * mimi_steps_per_latent
 
         # Set up multithreaded generation and decoding
-        latents_queue = queue.Queue()
-        result_queue = queue.Queue()
+        latents_queue: LatentQueue = queue.Queue()
+        result_queue: ResultQueue = queue.Queue()
 
         # Start decoder worker thread
         decoder_thread = threading.Thread(
@@ -748,13 +1026,15 @@ class TTSModel(nn.Module):
     @torch.no_grad
     def _generate(
         self,
-        model_state: dict,
+        model_state: ModelState,
         prepared: torch.Tensor,
         max_gen_len: int,
         frames_after_eos: int,
-        latents_queue: queue.Queue,
-        result_queue: queue.Queue,
-    ):
+        latents_queue: LatentQueue,
+        result_queue: ResultQueue,
+        attention_capture: SelectedAttentionCapture | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> threading.Thread:
         token_count = prepared.shape[1]
         current_end = self._flow_lm_current_end(model_state)
         required_len = current_end + token_count + max_gen_len
@@ -763,71 +1043,98 @@ class TTSModel(nn.Module):
         with display_execution_time("Prompting text"):
             self._run_flow_lm_and_increment_step(model_state=model_state, text_tokens=prepared)
 
-        def run_generation():
+        def run_generation() -> None:
             try:
                 self._autoregressive_generation(
-                    model_state, max_gen_len, frames_after_eos, latents_queue
+                    model_state,
+                    max_gen_len,
+                    frames_after_eos,
+                    latents_queue,
+                    attention_capture=attention_capture,
+                    cancel_event=cancel_event,
                 )
-            except Exception as e:
-                logger.error(f"Error in autoregressive generation: {e}")
+            except Exception as error:
+                logger.error("Error in autoregressive generation: %s", error)
                 # Report the generation error before stopping the decoder. Otherwise
                 # the decoder can publish "done" first and hide the exception.
-                if result_queue is not None:
-                    result_queue.put(("error", e))
+                result_queue.put(("error", error))
                 # Signal decoder to stop by putting None (completion sentinel)
-                if latents_queue is not None:
-                    latents_queue.put(None)
+                latents_queue.put(None)
 
         generation_thread = threading.Thread(target=run_generation, daemon=True)
         generation_thread.start()
+        return generation_thread
 
     @torch.no_grad
     def _autoregressive_generation(
-        self, model_state: dict, max_gen_len: int, frames_after_eos: int, latents_queue: queue.Queue
-    ):
+        self,
+        model_state: ModelState,
+        max_gen_len: int,
+        frames_after_eos: int,
+        latents_queue: LatentQueue,
+        attention_capture: SelectedAttentionCapture | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> None:
         backbone_input = torch.full(
             (1, 1, self.flow_lm.ldim),
             fill_value=float("NaN"),
             device=next(iter(self.flow_lm.parameters())).device,
             dtype=self.flow_lm.dtype,
         )
-        steps_times = []
+        steps_times: list[float] = []
         eos_step = None
-        for generation_step in range(max_gen_len):
-            with display_execution_time("Generating latent", print_output=False) as timer:
-                next_latent, is_eos = self._run_flow_lm_and_increment_step(
-                    model_state=model_state, backbone_input_latents=backbone_input
-                )
-                if is_eos.item() and eos_step is None:
-                    eos_step = generation_step
-                if eos_step is not None and generation_step >= eos_step + frames_after_eos:
+        try:
+            for generation_step in range(max_gen_len):
+                if cancel_event is not None and cancel_event.is_set():
                     break
+                with display_execution_time("Generating latent", print_output=False) as timer:
+                    if attention_capture is not None:
+                        attention_capture.begin_frame()
+                    next_latent, is_eos = self._run_flow_lm_and_increment_step(
+                        model_state=model_state,
+                        backbone_input_latents=backbone_input,
+                        attention_capture=attention_capture,
+                    )
+                    if cancel_event is not None and cancel_event.is_set():
+                        break
+                    unit_scores = (
+                        attention_capture.finish_frame() if attention_capture is not None else None
+                    )
+                    if is_eos.item() and eos_step is None:
+                        eos_step = generation_step
+                    if eos_step is not None and generation_step >= eos_step + frames_after_eos:
+                        break
 
-                # Add generated latent to queue for immediate decoding
-                latents_queue.put(next_latent)
-                backbone_input = next_latent
-            steps_times.append(timer.elapsed_time_ms)
-        else:
-            if os.environ.get("KPOCKET_TTS_ERROR_WITHOUT_EOS", "0") == "1":
-                raise RuntimeError("Generation reached maximum length without EOS!")
-            logger.warning(
-                "Maximum generation length reached without EOS, this very often indicates an error."
-            )
-
-        # Add sentinel value to signal end of generation
-        latents_queue.put(None)
-        logger.info("Average generation step time: %d ms", int(statistics.mean(steps_times)))
+                    # Add generated latent to queue for immediate decoding.
+                    if unit_scores is None:
+                        latents_queue.put(next_latent)
+                    else:
+                        latents_queue.put((next_latent, unit_scores))
+                    backbone_input = next_latent
+                assert timer.elapsed_time_ms is not None
+                steps_times.append(timer.elapsed_time_ms)
+            else:
+                if os.environ.get("KPOCKET_TTS_ERROR_WITHOUT_EOS", "0") == "1":
+                    raise RuntimeError("Generation reached maximum length without EOS!")
+                logger.warning(
+                    "Maximum generation length reached without EOS, this very often indicates an error."
+                )
+        finally:
+            # Wake the decoder on normal completion, cancellation, and generation errors.
+            latents_queue.put(None)
+        if steps_times:
+            logger.info("Average generation step time: %d ms", int(statistics.mean(steps_times)))
 
     @lru_cache(maxsize=2)
     def _cached_get_state_for_audio_prompt(
         self, audio_conditioning: Path | str | torch.Tensor, truncate: bool = False
-    ) -> dict:
+    ) -> ModelState:
         return self.get_state_for_audio_prompt(audio_conditioning, truncate)
 
     @torch.no_grad
     def get_state_for_audio_prompt(
         self, audio_conditioning: Path | str | torch.Tensor, truncate: bool = False
-    ) -> dict:
+    ) -> ModelState:
         """Create model state conditioned on audio prompt for continuation.
 
         This method processes an audio prompt and creates a model state that

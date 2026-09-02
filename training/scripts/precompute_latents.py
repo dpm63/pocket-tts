@@ -4,17 +4,18 @@ import logging
 import multiprocessing
 import os
 import time
-
-os.environ.setdefault("POCKET_TTS_NO_BEARTYPE", "1")
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import numpy as np
+import numpy.typing as npt
 import safetensors.torch
 import torch
 import typer
 from tqdm import tqdm
 
+from pocket_tts.models.mimi import MimiModel
+from pocket_tts.utils.config import Config
 from pocket_tts.utils.utils import download_if_necessary
 from training.args import load_args
 from training.dataloader import Entry, _load_window
@@ -32,12 +33,16 @@ def default_decode_workers() -> int:
     return max(4, len(os.sched_getaffinity(0)) - 2)
 
 
-def _decode_one(job: tuple) -> np.ndarray:
+# (path, start_sec, duration_sec, sample_rate): the arguments of _load_window.
+DecodeJob = tuple[str, float, float, int]
+
+
+def _decode_one(job: DecodeJob) -> npt.NDArray[np.float32]:
     path, start, duration, sample_rate = job
     return _load_window(path, start, duration, sample_rate)
 
 
-def _decode_chunk(jobs: list[tuple]) -> tuple[np.ndarray, list[int]]:
+def _decode_chunk(jobs: list[DecodeJob]) -> tuple[npt.NDArray[np.float32], list[int]]:
     wavs = [_load_window(p, s, d, sr) for (p, s, d, sr) in jobs]
     max_len = max(len(w) for w in wavs)
     batch = np.zeros((len(wavs), 1, max_len), dtype=np.float32)
@@ -53,12 +58,12 @@ def _parse_entry(line: str) -> Entry:
     )
 
 
-def _chunk_jobs(lines: list[str], idxs: list[int], sample_rate: int) -> list[tuple]:
+def _chunk_jobs(lines: list[str], idxs: list[int], sample_rate: int) -> list[DecodeJob]:
     chunk = [lines[i] for i in idxs]
     return [(e.path, e.start, e.duration, sample_rate) for e in map(_parse_entry, chunk)]
 
 
-def mimi_encode_hash(mimi) -> str:
+def mimi_encode_hash(mimi: MimiModel) -> str:
     """Hash of the weights on the encode path (encoder, encoder transformer,
     downsample): identifies which Mimi produced a latents store."""
     h = hashlib.sha256()
@@ -72,7 +77,7 @@ def mimi_encode_hash(mimi) -> str:
     return h.hexdigest()
 
 
-def load_frozen_mimi(config) -> torch.nn.Module:
+def load_frozen_mimi(config: Config) -> MimiModel:
     mimi = build_mimi(config.mimi)
     weights_file = download_if_necessary(str(config.weights_path))
     state = safetensors.torch.load_file(weights_file)
@@ -97,7 +102,7 @@ def load_frozen_mimi(config) -> torch.nn.Module:
 
 
 @torch.no_grad()
-def measure_stitch_frames(mimi, audio: torch.Tensor) -> tuple[int, float]:
+def measure_stitch_frames(mimi: MimiModel, audio: torch.Tensor) -> tuple[int, float]:
     fs = mimi.frame_size
     full = mimi.encode_to_latent(audio)
     k = full.shape[1] // 2
@@ -117,7 +122,13 @@ def measure_stitch_frames(mimi, audio: torch.Tensor) -> tuple[int, float]:
     return frames + CALIBRATION_MARGIN_FRAMES, floor
 
 
-def _calibrate(pool, lines: list[str], mimi, batch_size: int, device) -> tuple[int, float]:
+def _calibrate(
+    pool: ProcessPoolExecutor,
+    lines: list[str],
+    mimi: MimiModel,
+    batch_size: int,
+    device: torch.device,
+) -> tuple[int, float]:
     longest = sorted(map(_parse_entry, lines[:CALIBRATION_POOL_LINES]), key=lambda e: -e.duration)
     jobs = [(e.path, e.start, e.duration, mimi.sample_rate) for e in longest[:batch_size]]
     calib = list(pool.map(_decode_one, jobs))
@@ -133,7 +144,7 @@ def _entry_frames(n_samples: int, sample_rate: int, frame_rate: float) -> int:
     return max(1, int(n_samples * frame_rate / sample_rate))
 
 
-def _atomic_write_text(path: Path, text: str) -> None:
+def _atomic_write_text(path: Path, text: str):
     tmp = path.with_suffix(f".tmp.{os.getpid()}")
     tmp.write_text(text)
     tmp.rename(path)
@@ -176,8 +187,13 @@ def _pending_chunks(
 
 
 def _write_chunk(
-    latents: torch.Tensor, lens: list[int], idxs: list[int], manifest: Path, mimi, tag: str
-) -> None:
+    latents: torch.Tensor,
+    lens: list[int],
+    idxs: list[int],
+    manifest: Path,
+    mimi: MimiModel,
+    tag: str,
+):
     for b, n_samples in enumerate(lens):
         frames = min(_entry_frames(n_samples, mimi.sample_rate, mimi.frame_rate), latents.shape[1])
         path = manifest.parent / _latents_name(manifest, idxs[b], tag)
@@ -189,9 +205,9 @@ def _write_chunk(
 
 
 def _encode_pending(
-    pool,
-    mimi,
-    device,
+    pool: ProcessPoolExecutor,
+    mimi: MimiModel,
+    device: torch.device,
     lines: list[str],
     manifest: Path,
     batch_size: int,
@@ -199,7 +215,7 @@ def _encode_pending(
     tag: str,
     worker: int = 0,
     num_workers: int = 1,
-) -> None:
+):
     pending = _pending_chunks(lines, manifest, batch_size, tag, worker, num_workers)
     lookahead = decode_workers + 2  # keep every decode worker busy
     futures = {
@@ -223,10 +239,10 @@ def _write_manifest_and_meta(
     new_lines: list[str],
     stitch_frames: int,
     floor: float,
-    mimi,
+    mimi: MimiModel,
     weights_path: str,
     mimi_hash: str,
-) -> None:
+):
     out_manifest = manifest.with_name(manifest.stem + "_latents.jsonl")
     _atomic_write_text(out_manifest, "\n".join(new_lines) + "\n")
     meta = {
@@ -243,14 +259,14 @@ def _write_manifest_and_meta(
 
 def precompute_manifest(
     manifest: Path,
-    mimi,
-    device,
+    mimi: MimiModel,
+    device: torch.device,
     batch_size: int,
     decode_workers: int,
     weights_path: str,
     worker: int = 0,
     num_workers: int = 1,
-) -> None:
+):
     """Encode a manifest's utterances to per-utterance latents files.
 
     With num_workers > 1 each worker encodes a strided subset of chunks;
@@ -281,7 +297,7 @@ def precompute_manifest(
 
 
 @app.command()
-def main(config: str, batch_size: int = 16, decode_workers: int = 0) -> None:
+def main(config: str, batch_size: int = 16, decode_workers: int = 0):
     logging.basicConfig(level=logging.INFO)
     args = load_args(config)
     model_config = load_model_config(args.model_config, args.model_overrides)

@@ -18,6 +18,7 @@ Usage:
 
 import json
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -27,7 +28,7 @@ import typer
 app = typer.Typer(pretty_exceptions_show_locals=False)
 
 
-def iter_texts(paths: list[Path]):
+def iter_texts(paths: list[Path]) -> Iterator[str]:
     for p in paths:
         with open(p) as f:
             for line in f:
@@ -54,7 +55,7 @@ def main(
         float, typer.Option(help="lower to 0.9995 for large-alphabet languages (e.g. CJK)")
     ] = 1.0,
     model_type: Annotated[Literal["bpe", "unigram", "char"], typer.Option()] = "bpe",
-) -> None:
+):
     Path(output_prefix).parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as tmp:
         n = 0

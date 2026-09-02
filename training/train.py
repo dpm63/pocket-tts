@@ -6,12 +6,6 @@ Usage:
 
 import os
 
-# The package-wide beartype claw must be disabled before pocket_tts is first
-# imported: dynamo cannot trace the beartype wrappers and `compile` defaults
-# to on. Export POCKET_TTS_NO_BEARTYPE=0 to force type checking back on
-# (requires `compile: false`).
-os.environ.setdefault("POCKET_TTS_NO_BEARTYPE", "1")
-
 # Utterances are variable-length, so the default caching allocator fragments and
 # a batch that fits can still fail to allocate; expandable segments keep the
 # reserved memory flat at no throughput cost. Set only from the entry point,
@@ -25,11 +19,13 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from types import FrameType
 
 import torch
 from torch import nn
 from torch.nn.parallel import DistributedDataParallel as DDP
 
+from pocket_tts.models.mimi import MimiModel
 from training.args import TrainArgs, dump_args, load_args, save_args
 from training.checkpointing import EMA, latest_checkpoint, load_checkpoint, save_checkpoint
 from training.dataloader import DataLoader, SubprocessDataLoader, encode_batch
@@ -42,6 +38,7 @@ from training.distributed import (
     shutdown_distributed,
 )
 from training.modules.builders import build_models
+from training.modules.model import TrainableTTS
 from training.train_utils import (
     ProgressLog,
     _compile_models,
@@ -63,9 +60,9 @@ class Run:
     """Everything the training loop needs, assembled before the first step."""
 
     args: TrainArgs
-    model: nn.Module  # unwrapped, for EMA/checkpointing
+    model: TrainableTTS  # unwrapped, for EMA/checkpointing
     wrapped: nn.Module  # DDP-wrapped when distributed, else the model itself
-    mimi: nn.Module
+    mimi: MimiModel
     optimizer: torch.optim.Optimizer
     ema: EMA | None
     start_step: int
@@ -166,7 +163,7 @@ def setup(config_path: str) -> Run:
     )
 
 
-def main(config_path: str) -> None:
+def main(config_path: str):
     run = setup(config_path)
     # Unpacked for the hot loop; the thin ones stay run.* at their call sites.
     args, model, mimi = run.args, run.model, run.mimi
@@ -186,7 +183,10 @@ def main(config_path: str) -> None:
             args.data.max_voice_prompt_sec,
             rank,
             run.world_size,
-            seed=args.seed,
+            # Fold the resume step into the seed: the loader keeps no state
+            # across restarts, so a fixed seed would replay the same
+            # permutation from the top and bias coverage toward its head.
+            seed=args.seed + start_step,
             shuffle=args.data.shuffle,
             num_procs=args.data.loader_procs,
         )
@@ -200,7 +200,7 @@ def main(config_path: str) -> None:
     # checkpoint inside that window so a cancelled job resumes losslessly.
     stop_requested = False
 
-    def _request_stop(signum, frame):
+    def _request_stop(signum: int, frame: FrameType | None):
         nonlocal stop_requested
         stop_requested = True
 
@@ -234,7 +234,7 @@ def main(config_path: str) -> None:
             # Under DDP, allreduce only on the last micro-batch.
             last_micro = micro == args.grad_accum_steps - 1
             scaled = loss / args.grad_accum_steps
-            if not last_micro and hasattr(run.wrapped, "no_sync"):
+            if not last_micro and isinstance(run.wrapped, DDP):
                 with run.wrapped.no_sync():
                     scaled.backward()
             else:
@@ -312,7 +312,13 @@ def main(config_path: str) -> None:
 
 @torch.no_grad()
 def validate(
-    model, mimi, args: TrainArgs, device, rank: int, world_size: int, step: int
+    model: TrainableTTS,
+    mimi: MimiModel,
+    args: TrainArgs,
+    device: torch.device,
+    rank: int,
+    world_size: int,
+    step: int,
 ) -> dict[str, float]:
     model.eval()
     tokenize = model.flow_lm.conditioner.tokenizer.sp.encode

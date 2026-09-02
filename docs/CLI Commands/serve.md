@@ -5,7 +5,7 @@ The `serve` command starts a FastAPI web server that provides both a web interfa
 ## Basic Usage
 
 ```bash
-uvx pocket-tts serve
+uvx --from pocket-tts-timestamped pocket-tts serve
 # or if installed manually:
 pocket-tts serve
 ```

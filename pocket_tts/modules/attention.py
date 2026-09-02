@@ -3,7 +3,8 @@ from torch import nn
 from torch.nn import functional as F
 
 from pocket_tts.modules.rope import RotaryEmbedding
-from pocket_tts.modules.stateful_module import StatefulModule
+from pocket_tts.modules.stateful_module import ModelState, StatefulModule
+from pocket_tts.timestamps.alignment import SelectedAttentionCapture
 
 
 def complete_kv(
@@ -80,7 +81,7 @@ class _LinearKVCacheBackend:
             ),
         )
 
-    def increment_step(self, state: dict[str, torch.Tensor], increment: int) -> None:
+    def increment_step(self, state: dict[str, torch.Tensor], increment: int):
         state["offset"] += increment
 
     def rope_offset(
@@ -154,22 +155,27 @@ class StreamingMultiheadAttention(StatefulModule):
 
     def init_state(self, batch_size: int, sequence_length: int) -> dict[str, torch.Tensor]:
         weight = self.in_proj.weight
-        if callable(weight):
+        if isinstance(weight, torch.Tensor):
+            device = weight.device
+            dtype = weight.dtype
+        else:
             # torch.ao dynamic-quantized Linear: weight is a method returning a
             # qint8 tensor, but activations stay float32 — that's what the cache holds.
             device = weight().device
             dtype = torch.float32
-        else:
-            device = weight.device
-            dtype = weight.dtype
         return self._cache_backend.init_state(batch_size, sequence_length, device, dtype)
 
-    def increment_step(self, state: dict, increment: int = 1):
+    def increment_step(self, state: dict[str, torch.Tensor], increment: int = 1):
         self._cache_backend.increment_step(state, increment)
 
     def forward(
-        self, query: torch.Tensor, model_state: dict | None, attn_mask: torch.Tensor | None = None
-    ):
+        self,
+        query: torch.Tensor,
+        model_state: ModelState | None,
+        attn_mask: torch.Tensor | None = None,
+        attention_capture: SelectedAttentionCapture | None = None,
+        layer_index: int | None = None,
+    ) -> torch.Tensor:
         state = None if model_state is None else self.get_state(model_state)
 
         projected = self.in_proj(query)
@@ -192,11 +198,15 @@ class StreamingMultiheadAttention(StatefulModule):
                 1, -1
             )
             attn_mask = _build_attention_mask(pos_q, pos_k, self.context)
+
         x = F.scaled_dot_product_attention(q, k_attn, v_attn, attn_mask, dropout_p=0.0)
         x = x.transpose(1, 2)
         # Reshape from (b, t, h, d) to (b, t, h*d)
         b, t, h, d = x.shape
         x = x.reshape(b, t, h * d)
         x = self.out_proj(x)
+
+        if attention_capture is not None and layer_index is not None:
+            attention_capture.capture_attention(layer_index, q, k_attn)
 
         return x

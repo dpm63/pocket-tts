@@ -5,7 +5,7 @@ The `generate` command allows you to generate speech from text directly from the
 ## Basic Usage
 
 ```bash
-uvx pocket-tts generate
+uvx --from pocket-tts-timestamped pocket-tts generate
 # or if installed manually:
 pocket-tts generate
 ```
