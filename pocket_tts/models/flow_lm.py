@@ -10,6 +10,7 @@ from pocket_tts.modules.mlp import SimpleMLPAdaLN
 from pocket_tts.modules.stateful_module import ModelState
 from pocket_tts.modules.text_conditioner import LUTConditioner
 from pocket_tts.modules.transformer import StreamingTransformer
+from pocket_tts.timestamps.alignment import SelectedAttentionCapture
 from pocket_tts.utils.config import FlowLMConfig
 
 logger = logging.getLogger(__name__)
@@ -127,6 +128,7 @@ class FlowLMModel(nn.Module):
         temp: float,
         noise_clamp: float | None,
         eos_threshold: float,
+        attention_capture: SelectedAttentionCapture | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Apply language model on sequence and conditions.
         Given a tensor of sequence of shape [B, S, ldim], returns the loss in training mode
@@ -146,7 +148,13 @@ class FlowLMModel(nn.Module):
         sequence = torch.where(torch.isnan(sequence), self.bos_emb, sequence)
         input_ = self.input_linear(sequence)
 
-        transformer_out = self.backbone(input_, text_embeddings, sequence, model_state=model_state)
+        transformer_out = self.backbone(
+            input_,
+            text_embeddings,
+            sequence,
+            model_state=model_state,
+            attention_capture=attention_capture,
+        )
         transformer_out = transformer_out.to(torch.float32)
         assert sampler_decode_steps > 0
 
@@ -170,6 +178,7 @@ class FlowLMModel(nn.Module):
         text_embeddings: torch.Tensor,
         sequence: torch.Tensor,
         model_state: ModelState,
+        attention_capture: SelectedAttentionCapture | None = None,
     ) -> torch.Tensor:
         # Most of the time, one of those two tensors is empty, it allows us
         # to input text or audio embeddings into the model without adding an
@@ -179,7 +188,7 @@ class FlowLMModel(nn.Module):
         #     torch.save(text_embeddings, "debug_flow_lm_text_embeddings.pt")
         input_ = torch.cat([text_embeddings, input_], dim=1)
         # transformer_out = self.transformer(input_, model_state=model_state)
-        transformer_out = self.transformer(input_, model_state)
+        transformer_out = self.transformer(input_, model_state, attention_capture=attention_capture)
         if self.out_norm:
             transformer_out = self.out_norm(transformer_out)
         # remove the prefix from the model outputs (condition is prepended)
@@ -195,6 +204,7 @@ class FlowLMModel(nn.Module):
         temp: float,
         noise_clamp: float | None,
         eos_threshold: float,
+        attention_capture: SelectedAttentionCapture | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Sample next latent from the model given a sequence and a set of conditions.
         Args:
@@ -215,6 +225,7 @@ class FlowLMModel(nn.Module):
             noise_clamp=noise_clamp,
             eos_threshold=eos_threshold,
             model_state=model_state,
+            attention_capture=attention_capture,
         )
 
         return result

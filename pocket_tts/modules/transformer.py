@@ -7,6 +7,7 @@ from pocket_tts.modules.attention import StreamingMultiheadAttention, _cached_ca
 from pocket_tts.modules.layer_scale import LayerScale
 from pocket_tts.modules.rope import RotaryEmbedding
 from pocket_tts.modules.stateful_module import ModelState
+from pocket_tts.timestamps.alignment import SelectedAttentionCapture
 from pocket_tts.utils.config import FlowLMTransformerConfig
 
 
@@ -49,17 +50,39 @@ class StreamingTransformerLayer(nn.Module):
         return x_orig.to(update) + self.layer_scale_2(update)
 
     def _sa_block(
-        self, x: torch.Tensor, model_state: ModelState | None, attn_mask: torch.Tensor | None = None
+        self,
+        x: torch.Tensor,
+        model_state: ModelState | None,
+        attn_mask: torch.Tensor | None = None,
+        attention_capture: SelectedAttentionCapture | None = None,
+        layer_index: int | None = None,
     ) -> torch.Tensor:
         x_orig = x
         x = self.norm1(x)
-        update = self.self_attn(x, model_state, attn_mask=attn_mask)
+        update = self.self_attn(
+            x,
+            model_state,
+            attn_mask=attn_mask,
+            attention_capture=attention_capture,
+            layer_index=layer_index,
+        )
         return x_orig.to(update) + self.layer_scale_1(update)
 
     def forward(
-        self, x: torch.Tensor, model_state: ModelState | None, attn_mask: torch.Tensor | None = None
+        self,
+        x: torch.Tensor,
+        model_state: ModelState | None,
+        attn_mask: torch.Tensor | None = None,
+        attention_capture: SelectedAttentionCapture | None = None,
+        layer_index: int | None = None,
     ) -> torch.Tensor:
-        x = self._sa_block(x, model_state, attn_mask)
+        x = self._sa_block(
+            x,
+            model_state,
+            attn_mask=attn_mask,
+            attention_capture=attention_capture,
+            layer_index=layer_index,
+        )
         x = self._ff_block(x)
         return x
 
@@ -106,14 +129,25 @@ class StreamingTransformer(nn.Module):
             max_period=float(config.max_period),
         )
 
-    def forward(self, x: torch.Tensor, model_state: ModelState | None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        model_state: ModelState | None,
+        attention_capture: SelectedAttentionCapture | None = None,
+    ) -> torch.Tensor:
         attn_mask = None
         if model_state is None:
             # Stateless (training) path: one shared mask for all layers, built
             # outside any compiled region.
             attn_mask = _cached_causal_mask(x.shape[1], self.context, x.device)
-        for layer in self.layers:
-            x = layer(x, model_state, attn_mask=attn_mask)
+        for layer_index, layer in enumerate(self.layers):
+            x = layer(
+                x,
+                model_state,
+                attn_mask=attn_mask,
+                attention_capture=attention_capture,
+                layer_index=layer_index,
+            )
         return x
 
 
