@@ -26,7 +26,7 @@ from pocket_tts_timestamped import TTSModel
 model = TTSModel.load_model()
 voice = model.get_state_for_audio_prompt("alba")
 
-result = model.generate_audio_with_timestamps(voice_state, "Hello world!")
+result = model.generate_audio_with_timestamps(voice, "Hello world!")
 for word in result.words:
     print(word.word, word.start_time, word.end_time)
 process_audio(result.audio)
@@ -40,7 +40,7 @@ from pocket_tts_timestamped import TTSModel, AudioChunk, WordEnd, WordStart
 model = TTSModel.load_model()
 voice = model.get_state_for_audio_prompt("alba")
 
-stream = model.generate_audio_with_timestamps_stream(voice_state, "Hello world!")
+stream = model.generate_audio_with_timestamps_stream(voice, "Hello world!")
 for event in stream:
     if isinstance(event, AudioChunk):
         process_audio(event.audio)
