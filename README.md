@@ -52,24 +52,21 @@ for event in stream:
 
 ### Checkpoint support
 All official Pocket TTS checkpoints are supported, but accuracy differs between them.
-Preliminary results are provided for reference, MAE is calculated against CrisperWhisper 2.0 small's timestamps:
-| Checkpoint          | Heads        | Samples | Words | Skip rate | MAE |
+Evaluation results, MAE is measured against CrisperWhisper 2.0 large:
+| Checkpoint          | Head        | Samples | Words | Skip rate | Start/end MAE |
 |---------------------|-------------|---------|-------|-----------|---------------|
-| English 2026-04     | L3H8        | 552     | 3,841 | 0.0260%   | 44.52 ms      |
-| English 2026-04 24L | L14H10      | 204     | 1,874 | 0.0000%   | 46.77 ms      |
-| English 2026-01     | L3H8        | 120     | 990   | 0.0000%   | 72.90 ms      |
-| French 24L          | L11H9+L17H8 | 81      | 628   | 0.0000%   | 59.62 ms      |
-| German              | L3H6        | 57      | 465   | 0.0000%   | 57.48 ms      |
-| German 24L          | L3H6+L16H6  | 39      | 354   | 0.2825%   | 67.20 ms      |
-| Italian             | L4H0        | 46      | 388   | 0.0000%   | 66.98 ms      |
-| Italian 24L         | L4H0+L15H12 | 56      | 491   | 0.0000%   | 117.60 ms     |
-| Portuguese          | L3H14       | 57      | 533   | 0.0000%   | 68.56 ms      |
-| Portuguese 24L      | L3H14+L15H9 | 62      | 597   | 0.0000%   | 120.62 ms     |
-| Spanish             | L2H3        | 55      | 507   | 0.0000%   | 91.58 ms      |
-| Spanish 24L         | L6H9        | 61      | 570   | 0.0000%   | 78.25 ms      |
-> [!WARNING]
-> These results are based on a relatively small sample size and a weak model.
-> If accuracy is important to your use case, wait for the definitive results.
+| English 2026-04     | L3H8        | 441     | 3,932 | 0.0000%   | 49.38 ms      |
+| English 2026-04 24L | L14H10      | 425     | 3,814 | 0.0000%   | 44.48 ms      |
+| English 2026-01     | L3H8        | 465     | 3,772 | 0.0000%   | 78.77 ms      |
+| French 24L          | L11H9+L17H8 | 263     | 2,162 | 0.1850%   | 72.91 ms      |
+| German              | L3H6        | 309     | 2,610 | 0.0000%   | 64.26 ms      |
+| German 24L          | L3H6+L16H6  | 277     | 2,385 | 0.0000%   | 69.90 ms      |
+| Italian             | L4H0        | 314     | 2,861 | 0.0000%   | 68.10 ms      |
+| Italian 24L         | L4H0+L15H12 | 329     | 2,871 | 0.0000%   | 97.57 ms      |
+| Portuguese          | L3H14       | 283     | 2,411 | 0.0000%   | 59.90 ms      |
+| Portuguese 24L      | L3H14+L15H9 | 311     | 2,633 | 0.0000%   | 110.30 ms     |
+| Spanish             | L2H3        | 246     | 2,303 | 0.0434%   | 88.47 ms      |
+| Spanish 24L         | L6H9        | 291     | 2,574 | 0.0000%   | 74.82 ms      |
 
 # About Pocket TTS
 
